@@ -1,0 +1,55 @@
+# Pipeline configuration for one EK80 FM RAW file.
+
+input:
+  sonar_model: EK80
+  waveform_mode: FM
+  encoding_mode: complex
+  beam_group: Beam_group1
+  # Survey-specific transducer depth below the water surface, in metres.
+  # Set this before producing absolute target depth; null means unknown.
+  transducer_depth_m: 0.54
+
+navigation:
+  # REQUIRED: one RAW file corresponds to one platform, while the SQLite DB
+  # may contain multiple platforms.
+  platform: Sailor1
+  interpolation: linear
+  max_gap_seconds: null
+  extrapolate: false
+  navigation_db: data/positions/sailbuoy_metadatabase.db
+
+surface:
+  threshold_db: -50.0
+  consecutive_samples: 3
+  dead_zone_samples: 0
+
+bottom:
+  method: basic
+  params: {}
+
+single_target:
+  enabled: false
+  method: echoview_splitbeam_method2
+  params:
+    pldl_db: 6.0
+    min_norm_pulse: 0.8
+    max_norm_pulse: 1.5
+    beam_comp_model: simrad_lobe
+    max_beam_comp_db: 6.0
+    max_sd_minor_deg: 0.2
+    max_sd_major_deg: 0.2
+    TS_comp_max: -10
+    TS_comp_min: -70
+    
+    # Optional parameters
+
+    dec_tir_samples: 1
+    bottom_offset_m: 0.5
+    exclude_above_m: 5
+    exclude_below_m: null
+    allow_nans_inside_envelope: false
+
+
+output:
+  directory: "output"
+  include_metadata_columns: false

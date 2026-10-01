@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echopype-fm-std"
+version = "0.1.0"
+description = "EK80 FM-mode single-target detection pipeline built around Echopype"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "echopype @ git+https://github.com/LOCEANlloydizard/echopype.git@b26d049",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "xarray>=2024.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+echopype-fm = "echopype_fm_std.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

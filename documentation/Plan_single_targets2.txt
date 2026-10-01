@@ -1,0 +1,31 @@
+
+I need help to plan an execute a coding task. I intend to use echopype (https://github.com/echostack-org/echopype), to run a pipeline that includes the following steps: 
+
+1 read .raw files in FM mode from an EK80 system (one at the time)
+2 add geo positions to the raw data (interpolate when necessary) from a sqlite db
+3 perform pulse compression on the signals 
+4 detect sea floor
+5 detect surface turbidity 
+6 run single target detection 
+7 export all single targets a .csv file with one row per single target, and the following columns: 
+
+- depth
+- postion in the beam alongship
+- position in the beam arthwardship
+- TS compensated for beam position
+- TS not compensated for beam position
+
+I believe code for all these steps exists, but they differently implemented and in different places: 
+
+1, 3, 4 exists in the standard echopype release available through pip
+2 potentially exists in echopype but at least in the past, the function did not work. See: https://github.com/echostack-org/echopype/issues/1493
+
+5 has been implemented in another repo and using some other packages (numpy instead of xarray). It would be very preferable if this function could be remade to be compatible and similar to other functions in echopype. Here is the current implementation:  https://github.com/BalticSeabird/echoedge/blob/new-structure/lib/find_waves.py
+
+6 is developed but has not been released yet. The code can be extracted from here: https://github.com/echostack-org/echopype/pull/1588 with some further documentation here: https://github.com/echostack-org/echopype-examples/pull/83
+
+7 does not exist to my knowledge and needs to be implemented in relation to 6. 
+
+Can you help me develop a solid, step-by-step plan for all of this, that I can start implementing? 
+
+I will work on a local computer with local .raw files. I suppose the best solution would be to create a new repo which installs echopype through pip and complements with own functions in a separate folder. Ahead, I want to use this code on several computers, so having a repo where everything is gathered is important. Please ask if anything is unclear. 
