@@ -10,18 +10,30 @@ input:
   transducer_depth_m: 0.54
 
 navigation:
-  # REQUIRED: one RAW file corresponds to one platform, while the SQLite DB
-  # may contain multiple platforms.
-  platform: Sailor1
+  # Default platform. For a RAW file from another platform, use the
+  # per-run --platform override rather than maintaining another config file.
+  platform: SAILOR1
   interpolation: linear
   max_gap_seconds: null
   extrapolate: false
   navigation_db: data/positions/sailbuoy_metadatabase.db
 
 surface:
-  threshold_db: -50.0
+  threshold_db: -77.0
   consecutive_samples: 3
-  dead_zone_samples: 0
+  dead_zone_samples: 10
+  range_bin_fraction: 0.1
+  rolling_ping_window: 3
+  use_original_wave_logic: true
+  wave_threshold_db: -77.0
+  wave_threshold_layer_db: -68.0
+  wave_consecutive_samples: 3
+  beam_dead_zone_samples: 10
+  layer_quantile: 0.7
+  layer_strength_threshold_db: -80.0
+  layer_consecutive_pings: 3
+  layer_minimum_samples: 10
+  extreme_wave_size_m: 70.0
 
 bottom:
   method: basic

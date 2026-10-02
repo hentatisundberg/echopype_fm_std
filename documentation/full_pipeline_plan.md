@@ -29,7 +29,15 @@ EK80 FM RAW
 Already available or demonstrated:
 
 - EK80 RAW opening through Echopype.
-- SQLite navigation reading and ping-time interpolation in `navigation.py`.
+- SQLite navigation reading, platform filtering, and ping-time interpolation
+  in `navigation.py`.
+- Ping-aligned latitude and longitude inserted into
+  `EchoData["Platform"]` through Echopype's `update_platform()` API.
+- Real-data coordinate checks for:
+  - `SAILOR1` using the June 27, 2020 EK80 FM RAW file;
+  - `SAILOR2` using the April 26, 2026 EK80 FM RAW file.
+- Per-run platform selection through the `--platform` command-line override;
+  separate YAML files per platform are not required.
 - An xarray surface threshold/run-length implementation in `surface.py`.
 - A thin Echopype seafloor wrapper in `bottom.py`.
 - A validated FM prototype in `scripts/test_fm2.py`:
@@ -80,13 +88,47 @@ The exact sign convention must be confirmed against the survey metadata before p
 Use these products as the boundaries between modules:
 
 1. `EchoData` and the selected acoustic beam group.
-2. Ping-aligned navigation dataset containing `latitude`, `longitude`, and `navigation_valid`.
+2. Ping-aligned navigation stored in the `EchoData["Platform"]` group, containing
+   `latitude` and `longitude`; the project may retain a validation view with
+   `navigation_valid` for diagnostics.
 3. Calibrated `Sv` for bottom and surface analysis.
 4. Calibrated `Sp` with pulse-compressed split-beam angles, `sample_interval`, and `tau_effective` for target detection and TS.
 5. One-dimensional bottom and surface boundaries indexed by `ping_time`.
 6. Target dataset containing target ping time, acoustic range, angles, TS, and optional navigation/depth fields.
 
-Do not attach navigation to `EchoData` through the previously problematic platform-update path unless a later Echopype API is specifically validated for this use case. Keep it as a project-managed xarray sidecar initially.
+The configured navigation platform is the default for a run. A per-file
+platform override should be used when processing files from another platform;
+separate configuration files are not required.
+
+The default is configured in `config/default.yaml`:
+
+```yaml
+navigation:
+  platform: SAILOR1
+```
+
+For a RAW file belonging to another platform, override it for that run:
+
+```text
+echopype-fm run --raw FILE.raw --navigation-db DB.sqlite \
+    --config config/default.yaml --platform SAILOR2
+```
+
+The navigation test script supports the same pattern:
+
+```text
+python scripts/test_navigation.py --raw data/raw/FILE.raw \
+    --platform SAILOR2
+```
+
+The platform selection must remain explicit because multiple platform tracks
+can overlap in time. A successful interpolation with the wrong platform would
+otherwise produce plausible but scientifically incorrect coordinates.
+
+Attach ping-aligned navigation to `EchoData["Platform"]` through Echopype's
+validated `update_platform()` API. A project-managed aligned dataset may be
+returned as a diagnostic view, but latitude and longitude must not exist only
+outside `EchoData`.
 
 ## Implementation sequence
 
@@ -121,8 +163,16 @@ Do not attach navigation to `EchoData` through the previously problematic platfo
    - no extrapolation outside the SQLite time range;
    - optional maximum-gap masking;
    - `navigation_valid` behavior.
-3. Add a separate helper for target-level lookup/interpolation only if the target ping times cannot reuse the aligned ping dataset.
-4. Test malformed databases, empty platform selections, duplicate normalized timestamps, timezone variants, and large gaps.
+3. Retain one source navigation record immediately before and after the
+   requested RAW time range. These boundary records are interpolation
+   brackets, not extrapolation: coordinates remain invalid when the SQLite
+   data does not cover a ping.
+4. Store the aligned coordinates in `EchoData["Platform"]` and verify that
+   their length matches the acoustic ping count.
+5. Add a separate helper for target-level lookup/interpolation only if the
+   target ping times cannot reuse the aligned ping dataset.
+6. Test malformed databases, empty platform selections, duplicate normalized
+   timestamps, timezone variants, large gaps, and multiple platform choices.
 
 ### Phase 3: FM calibration and pulse compression
 
@@ -171,9 +221,12 @@ This is a first-class implementation task, not just orchestration.
        sv,
        method="threshold",
        params={
-           "threshold_db": -50,
-           "consecutive_samples": 5,
-           "dead_zone_samples": 0,
+           "wave_threshold_db": -77,
+           "wave_threshold_layer_db": -68,
+           "wave_consecutive_samples": 3,
+           "beam_dead_zone_samples": 10,
+           "range_bin_fraction": 0.1,
+           "rolling_ping_window": 3,
        },
    )
    ```
@@ -183,6 +236,40 @@ This is a first-class implementation task, not just orchestration.
 5. Add focused tests for exact run lengths, NaNs, dead zones, no detection, coordinate mapping, multiple pings, and non-mutation.
 6. Compare the new implementation against reference cases from the original `find_waves.py` before changing the algorithm.
 7. Validate scientifically whether the first below-threshold run represents the intended surface turbidity boundary. Algorithmic improvements should be a later, separately validated task.
+
+Current implementation status: `detect_surface()` accepts either a calibrated
+`Sv` DataArray or Dataset, supports the Echopype-style `method`/`params`
+contract, and never mutates its input. Before threshold/run-length detection,
+the range dimension is reduced to 10% of its original sample count by default
+(`range_bin_fraction: 0.1`, equivalent to averaging 10 samples at a time);
+this is configurable for tuning. The detector now ports the original
+`find_waves.py` semantics: `wave_threshold_db=-77`, three consecutive samples,
+a beam dead zone, the persistent-layer check, the `-68 dB` layer threshold,
+and the deep-result retry. Echopype's `echo_range` variable is used for the
+returned boundary in metres when available. `scripts/test_surface.py` runs
+this detector on one or more EK80 RAW files, while retaining the original
+`EchoData` during calibration and writes an echogram overlay for visual
+inspection. The final boundary can also be conservatively expanded with a
+centered rolling maximum across nearby pings; the default
+`rolling_ping_window: 3` takes the deepest detected boundary from the previous,
+current, and next ping, with `min_periods=1` at file edges. This is intended
+to bridge small gaps between surface spikes and strong turbidity echoes.
+
+The previous 5 m result was traced to two implementation errors: `-50 dB`
+detected the first quiet background region rather than the original surface
+spikes, and `range_bin_fraction` was incorrectly used as the coarsening window
+instead of its reciprocal. Both are corrected; the regenerated RAW-set
+results should be visually reviewed before selecting final survey parameters.
+
+The final validated visual output is generated with:
+
+```text
+python scripts/test_surface.py --output-dir output/surface-rolling-all
+```
+
+The generated overlays are development/acceptance artifacts and are not
+required pipeline inputs. Keep only the final overlay set needed for review;
+intermediate threshold and coarsening runs can be removed safely.
 
 ### Phase 7: Single-target detection
 
@@ -239,6 +326,8 @@ Create or update small scripts that exercise modules independently:
 6. `test_single_target.py`: detector count, ranges, angles, and boundary filtering.
 7. `test_targets.py`: TS calculation, depth conversion, and exact CSV output.
 8. `plot_targets.py`: read the configured depth/range convention and transducer depth from YAML when overlaying or labelling results.
+9. `test_navigation.py`: accept `--raw` and optional `--platform`, print the
+   first five ping coordinates, and report stored-coordinate coverage.
 
 Each script should load configuration through the shared loader. Avoid independent YAML parsing and avoid hard-coded transducer depth.
 
@@ -278,6 +367,23 @@ Then run the local real-data checks using one representative RAW file and the ma
 - compensated and uncompensated TS distributions;
 - exact CSV header and row count;
 - transducer depth and depth/range convention.
+
+The current navigation acceptance checks are:
+
+```text
+python scripts/test_navigation.py \
+    --raw data/raw/SLUAquaSailor2020V2-Phase0-D20200627-T060144-0.raw \
+    --platform SAILOR1
+
+python scripts/test_navigation.py \
+    --raw data/raw/SLUAquaSailor2020V1-Phase0-D20260426-T032616-0.raw \
+    --platform SAILOR2
+```
+
+Both checks insert coordinates into `EchoData["Platform"]`. The validated
+results are 255/255 valid navigation pings for the first file and 209/209 for
+the second file. The first five timestamps, latitudes, and longitudes are
+printed for direct inspection.
 
 Inspect representative echograms with surface and bottom overlays. Test missing navigation, out-of-range navigation, large gaps, missing boundaries, empty detections, multiple platforms, and missing transducer depth.
 

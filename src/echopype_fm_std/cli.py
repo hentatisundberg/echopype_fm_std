@@ -22,6 +22,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--raw", required=True)
     run.add_argument("--navigation-db", required=True)
     run.add_argument("--config", default="config/default.yaml")
+    run.add_argument(
+        "--platform",
+        help="Navigation platform for this RAW file; overrides navigation.platform",
+    )
 
     platforms = sub.add_parser("nav-platforms", help="List platform names in a navigation database")
     platforms.add_argument("--navigation-db", required=True)
@@ -43,6 +47,7 @@ def main() -> None:
             raw_path=Path(args.raw),
             navigation_db=Path(args.navigation_db),
             config_path=Path(args.config),
+            platform=args.platform,
         )
         print("Completed:", ", ".join(result["stages_completed"]))
         if result.get("navigation") is not None:

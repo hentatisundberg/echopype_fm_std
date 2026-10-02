@@ -35,7 +35,9 @@ def _make_db(path):
             (3, "VESSEL_B", "S1", "2026-01-01T00:00:00Z", 90.0, 100.0),
         ]
         con.executemany(
-            "INSERT INTO track_points (id,platform,survey_id,timestamp_utc,latitude,longitude) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO track_points "
+            "(id,platform,survey_id,timestamp_utc,latitude,longitude) "
+            "VALUES (?,?,?,?,?,?)",
             rows,
         )
 
@@ -76,3 +78,26 @@ def test_align_navigation_interpolates_and_does_not_extrapolate(tmp_path):
     np.testing.assert_allclose(aligned.latitude.values[1], 15.0)
     assert np.isnan(aligned.latitude.values[2])
     assert aligned.navigation_valid.values.tolist() == [False, True, False]
+
+
+def test_read_navigation_keeps_interpolation_boundary_records(tmp_path):
+    db = tmp_path / "positions.sqlite"
+    _make_db(db)
+
+    nav = read_navigation(
+        db,
+        platform="VESSEL_A",
+        start_time="2026-01-01T00:05:00Z",
+        end_time="2026-01-01T00:06:00Z",
+    )
+
+    np.testing.assert_array_equal(
+        nav.timestamp.values,
+        pd.to_datetime(
+            [
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:10:00Z",
+            ],
+            utc=True,
+        ).tz_localize(None).to_numpy(dtype="datetime64[ns]"),
+    )

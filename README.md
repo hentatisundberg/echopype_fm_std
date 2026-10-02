@@ -58,7 +58,26 @@ echopype-fm run \
   --config config/default.yaml
 ```
 
-At this stage, the project implements the repository structure, RAW-file inspection, platform-filtered SQLite navigation, and an xarray-compatible surface detector. The FM calibration, bottom detector, FM angle calculation, target detector, target TS calculation, and final CSV writer have explicit adapter interfaces but are intentionally not guessed or reimplemented until they are tested against real FM data.
+The surface detector can be tested against all local RAW files and produces
+echogram overlays without replacing the retained `EchoData` object:
+
+```bash
+python scripts/test_surface.py --output-dir output/surface-rolling-all
+```
+
+Pass `--raw FILE` more than once to select a subset. The script computes
+calibrated `Sv`, detects the boundary, and closes only temporary Echopype swap
+files; the surface result remains a separate xarray object that can be used
+alongside `EchoData` by downstream stages. The default configuration follows
+the original `find_waves.py` thresholds, averages the range dimension in
+groups of ten samples, and applies a centered three-ping rolling maximum to
+conservatively bridge short gaps. The output directory contains one
+`*_surface.png` overlay per input RAW file.
+
+The FM calibration, bottom detector, FM angle calculation, target detector,
+target TS calculation, and final CSV writer have explicit adapter interfaces
+but are intentionally not guessed or reimplemented until they are tested
+against real FM data.
 
 ## Experimental Echopype branch
 
@@ -99,6 +118,7 @@ CREATE TABLE track_points (
 The reader:
 
 - selects only the configured platform;
+- accepts a per-run platform override for files from another platform;
 - parses `timestamp_utc` as UTC;
 - sorts by time;
 - removes duplicate timestamps defensively;

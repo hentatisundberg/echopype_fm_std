@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-
 REQUIRED_COLUMNS = {
     "platform",
     "timestamp_utc",
@@ -28,6 +27,7 @@ def read_navigation(
     platform: str,
     start_time: Any | None = None,
     end_time: Any | None = None,
+    include_boundary_records: bool = True,
 ) -> xr.Dataset:
     """Read navigation for one platform from the track_points SQLite table.
 
@@ -63,11 +63,20 @@ def read_navigation(
     df["timestamp"] = _ensure_datetime64_ns_utc(df["timestamp_utc"])
     df = df.sort_values("timestamp")
 
+    start = None
+    end = None
     if start_time is not None:
         start = _ensure_datetime64_ns_utc([start_time])[0]
-        df = df.loc[df["timestamp"] >= start]
+        lower_boundary = df.loc[df["timestamp"] < start].tail(1)
+        df = pd.concat([lower_boundary, df.loc[df["timestamp"] >= start]])
     if end_time is not None:
         end = _ensure_datetime64_ns_utc([end_time])[0]
+        upper_boundary = df.loc[df["timestamp"] > end].head(1)
+        df = pd.concat([df.loc[df["timestamp"] <= end], upper_boundary])
+
+    if start is not None and not include_boundary_records:
+        df = df.loc[df["timestamp"] >= start]
+    if end is not None and not include_boundary_records:
         df = df.loc[df["timestamp"] <= end]
 
     if df.empty:
@@ -106,7 +115,10 @@ def list_platforms(db_path: str | Path) -> list[str]:
     if not db_path.exists():
         raise FileNotFoundError(db_path)
 
-    query = "SELECT DISTINCT platform FROM track_points WHERE platform IS NOT NULL ORDER BY platform"
+    query = (
+        "SELECT DISTINCT platform FROM track_points "
+        "WHERE platform IS NOT NULL ORDER BY platform"
+    )
     with sqlite3.connect(db_path) as con:
         rows = con.execute(query).fetchall()
     return [str(row[0]) for row in rows]
@@ -127,8 +139,8 @@ def align_navigation(
     ping_time:
         Acoustic ping timestamps. They are interpreted as UTC if timezone-naive.
     max_gap_seconds:
-        Optional maximum gap between navigation observations. Interpolated
-        positions inside larger gaps are masked to NaN.
+        Optional maximum distance from a navigation observation for a target
+        ping. Positions farther away are masked to NaN.
     """
     if "timestamp" not in nav.dims:
         raise ValueError("Navigation dataset must have a 'timestamp' dimension.")
@@ -154,7 +166,6 @@ def align_navigation(
         left = np.clip(idx - 1, 0, len(source_t) - 1)
         right = np.clip(idx, 0, len(source_t) - 1)
         gap_ns = source_t[right] - source_t[left]
-        # At the edges, interpolation is invalid outside source coverage anyway.
         gap_valid = gap_ns <= int(max_gap_seconds * 1e9)
         aligned["latitude"] = aligned["latitude"].where(gap_valid)
         aligned["longitude"] = aligned["longitude"].where(gap_valid)
@@ -166,3 +177,36 @@ def align_navigation(
     aligned.attrs["extrapolate"] = False
 
     return aligned
+
+
+def add_navigation_to_echodata(echodata: Any, aligned: xr.Dataset) -> Any:
+    """Store ping-aligned navigation in an Echopype ``EchoData`` object.
+
+    Echopype's ``Platform`` group is the canonical container for platform
+    coordinates. The input dataset must be indexed by ``ping_time`` and
+    contain latitude and longitude values aligned to the acoustic pings.
+    """
+    if "ping_time" not in aligned.dims:
+        raise ValueError("Aligned navigation must have a 'ping_time' dimension.")
+    for name in ("latitude", "longitude"):
+        if name not in aligned:
+            raise ValueError(f"Aligned navigation is missing {name!r}.")
+        if aligned[name].dims != ("ping_time",):
+            raise ValueError(f"Aligned navigation {name!r} must be one-dimensional.")
+
+    if not hasattr(echodata, "update_platform"):
+        raise TypeError("echodata must provide Echopype's update_platform method.")
+
+    echodata.update_platform(
+        aligned[["latitude", "longitude"]],
+        variable_mappings={"latitude": "latitude", "longitude": "longitude"},
+    )
+
+    platform = echodata["Platform"]
+    for name in ("latitude", "longitude"):
+        if name not in platform:
+            raise RuntimeError(f"Echopype Platform group does not contain {name!r} after update.")
+        if platform[name].size != aligned[name].size:
+            raise RuntimeError(f"Stored Platform {name!r} length does not match ping navigation.")
+
+    return echodata

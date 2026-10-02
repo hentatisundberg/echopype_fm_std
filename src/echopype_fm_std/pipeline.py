@@ -3,18 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .bottom import detect_bottom
 from .config import load_config
 from .fm import pulse_compress_fm
 from .io import get_beam_group, open_raw
-from .navigation import align_navigation, read_navigation
-from .surface import detect_surface
+from .navigation import add_navigation_to_echodata, align_navigation, read_navigation
 
 
 def run_pipeline(
     raw_path: str | Path,
     navigation_db: str | Path,
     config_path: str | Path,
+    platform: str | None = None,
 ) -> dict[str, Any]:
     """Run the currently implemented starter stages and report the state.
 
@@ -31,9 +30,10 @@ def run_pipeline(
     ping_time = bg["ping_time"]
 
     nav_cfg = cfg["navigation"]
+    selected_platform = platform or nav_cfg["platform"]
     nav = read_navigation(
         navigation_db,
-        platform=nav_cfg["platform"],
+        platform=selected_platform,
         start_time=ping_time.values[0],
         end_time=ping_time.values[-1],
     )
@@ -42,11 +42,13 @@ def run_pipeline(
         ping_time,
         max_gap_seconds=nav_cfg.get("max_gap_seconds"),
     )
+    add_navigation_to_echodata(ed, nav_aligned)
 
     result: dict[str, Any] = {
         "echo_data": ed,
         "beam_group": bg,
         "navigation": nav_aligned,
+        "platform": selected_platform,
         "stages_completed": ["read_raw", "align_navigation"],
     }
 
@@ -69,6 +71,8 @@ def run_pipeline(
 
     # Placeholder: actual Sv/Sp dataset selection needs to be connected here.
     # Once the calibrated Sv DataArray is available, the following pattern is used:
-    # result["bottom"] = detect_bottom(ed, method=cfg["bottom"]["method"], **cfg["bottom"]["params"])
+    # result["bottom"] = detect_bottom(
+    #     ed, method=cfg["bottom"]["method"], **cfg["bottom"]["params"]
+    # )
     # result["surface"] = detect_surface(result["sv"], **cfg["surface"])
     return result
