@@ -79,6 +79,89 @@ target TS calculation, and final CSV writer have explicit adapter interfaces
 but are intentionally not guessed or reimplemented until they are tested
 against real FM data.
 
+### Bottom conditioning
+
+Blackwell conditioning can be enabled under `bottom.params` after comparing
+it with the direct detector result. Preprocessing affects only the `Sv`
+variable passed to Blackwell; split-beam angles remain unchanged. Available
+preprocessing methods are `none`, `max`, `median`, `median_max`, and
+`fill_dropouts`.
+`max` and `median` use `window`, while `fill_dropouts` linearly fills only
+internal gaps up to `max_gap` pings.
+`median_max` applies a centered median with `median_window` first, then a
+centered maximum with `max_window`; this is intended to suppress isolated
+pelagic peaks before bridging short dropouts.
+
+Postprocessing methods are `none`, `max`, `median`, `median_interpolate`, and
+`max_interpolate`.
+`max` applies a centered rolling minimum to the detected range, despite the
+legacy method name: range increases downward, so this selects the shallowest
+local detection and is conservative when masking below the bottom. `median`
+applies a centered rolling median, while `median_interpolate` replaces isolated
+deviations larger than `max_deviation_m` using
+the local median and linearly fills only internal gaps up to `max_gap`.
+`max_interpolate` combines this conservative rolling-minimum behavior with the bounded
+internal-gap interpolation of `median_interpolate`.
+Long gaps remain missing. For example:
+
+```yaml
+bottom:
+  params:
+    preprocessing:
+      method: median_max
+      median_window: 3
+      max_window: 3
+    postprocessing:
+      method: median_interpolate
+      window: 5
+      max_deviation_m: 8
+      max_gap: 3
+      edge_fill: linear
+      max_edge_gap: 0
+    refinement:
+      enabled: true
+      window_m: 2.0
+      threshold_db: -35.0
+```
+
+`edge_fill: linear` extrapolates only missing pings before the first or after
+the last valid bottom detection. `nearest` carries the closest valid value
+instead. `max_edge_gap: 0` allows the edge fill to cover any edge gap; set a
+positive value to limit it. Internal gaps are never filled by this option.
+When enabled, the final refinement searches the original `Sv` data within
+`window_m` of the tracked line and chooses the shallowest sample at or above
+`threshold_db`, but only at or above the tracked range. It can therefore move
+the line upward to the top of the bottom echo, never downward onto a deeper
+string echo.
+
+The configured conditioning is applied by the pipeline after calibration and
+before the bottom result is returned. The interactive inspector remains
+available for future tuning and comparison against representative RAW files.
+
+### Interactive bottom inspection
+
+For human-in-the-loop tuning, use the Matplotlib inspector:
+
+```bash
+python scripts/inspect_bottom_interactive.py \
+  --raw data/raw/SLUAquaSailor2020V1-Phase0-D20260503-T061158-1.raw
+```
+
+The inspector loads `config/default.yaml` and uses the same preprocessing,
+Blackwell, postprocessing, and refinement stages as the pipeline. Its native
+fields and method selectors control the Blackwell Sv/angle
+thresholds, search range, preprocessing method/window/gap, and postprocessing
+method/window/deviation/gap. Click `Apply` to run all three displayed stages:
+the raw Blackwell result, Blackwell on the preprocessed `Sv`, and the final
+postprocessed line. The echogram remains the original calibrated `Sv`, so
+conditioning effects can be compared against the unmodified signal. File
+loading and detector calculations run in the background so the window remains
+interactive; the status line reports final-line coverage.
+`Previous` and `Next` navigate through files passed with repeated `--raw`
+arguments, and `Save YAML` writes the current parameters to the output
+directory without modifying the main configuration. The y-axis is the
+physical echo range in metres.
+
 ## Experimental Echopype branch
 
 PR #1588 is still a draft. It contains prototype FM calibration/spectrum functionality and the single-target detection implementation, but the upstream public dispatcher/API is still evolving. Do not make the whole project depend on an unpinned moving branch.

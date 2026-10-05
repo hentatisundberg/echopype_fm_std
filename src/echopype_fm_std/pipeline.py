@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .config import load_config
-from .fm import pulse_compress_fm
+import echopype as ep
+
+from .bottom import detect_bottom
+from .config import calibration_kwargs, load_config
 from .io import get_beam_group, open_raw
 from .navigation import add_navigation_to_echodata, align_navigation, read_navigation
+from .surface import detect_surface
 
 
 def run_pipeline(
@@ -15,64 +18,71 @@ def run_pipeline(
     config_path: str | Path,
     platform: str | None = None,
 ) -> dict[str, Any]:
-    """Run the currently implemented starter stages and report the state.
-
-    The function intentionally stops before experimental FM stages unless they
-    have been wired and validated. This makes partial progress explicit rather
-    than silently producing scientifically incomplete CSV output.
-    """
+    """Run input, navigation, calibrated Sv, bottom, and surface stages."""
     cfg = load_config(config_path)
     raw_path = Path(raw_path)
 
     ed = open_raw(raw_path, cfg)
-    beam_group_name = cfg.get("input", {}).get("beam_group", "Beam_group1")
-    bg = get_beam_group(ed, beam_group_name)
-    ping_time = bg["ping_time"]
-
-    nav_cfg = cfg["navigation"]
-    selected_platform = platform or nav_cfg["platform"]
-    nav = read_navigation(
-        navigation_db,
-        platform=selected_platform,
-        start_time=ping_time.values[0],
-        end_time=ping_time.values[-1],
-    )
-    nav_aligned = align_navigation(
-        nav,
-        ping_time,
-        max_gap_seconds=nav_cfg.get("max_gap_seconds"),
-    )
-    add_navigation_to_echodata(ed, nav_aligned)
-
-    result: dict[str, Any] = {
-        "echo_data": ed,
-        "beam_group": bg,
-        "navigation": nav_aligned,
-        "platform": selected_platform,
-        "stages_completed": ["read_raw", "align_navigation"],
-    }
-
-    # The following stages become active as their adapters are validated.
     try:
-        pulse_compressed = pulse_compress_fm(ed, config=cfg)
-    except NotImplementedError:
-        result["stages_pending"] = [
-            "pulse_compression",
-            "seafloor_detection",
-            "surface_detection",
-            "single_target_detection",
-            "target_ts",
-            "csv_export",
-        ]
+        beam_group_name = cfg.get("input", {}).get("beam_group", "Beam_group1")
+        bg = get_beam_group(ed, beam_group_name)
+        ping_time = bg["ping_time"]
+
+        nav_cfg = cfg["navigation"]
+        selected_platform = platform or nav_cfg["platform"]
+        nav = read_navigation(
+            navigation_db,
+            platform=selected_platform,
+            start_time=ping_time.values[0],
+            end_time=ping_time.values[-1],
+        )
+        nav_aligned = align_navigation(
+            nav,
+            ping_time,
+            max_gap_seconds=nav_cfg.get("max_gap_seconds"),
+        )
+        add_navigation_to_echodata(ed, nav_aligned)
+
+        result: dict[str, Any] = {
+            "echo_data": ed,
+            "beam_group": bg,
+            "navigation": nav_aligned,
+            "platform": selected_platform,
+            "stages_completed": ["read_raw", "align_navigation"],
+        }
+
+        input_cfg = cfg["input"]
+        sv = ep.calibrate.compute_Sv(
+            ed,
+            waveform_mode=input_cfg["waveform_mode"],
+            encode_mode=input_cfg["encoding_mode"],
+            **calibration_kwargs(cfg),
+        )
+        bottom_cfg = cfg["bottom"]
+        bottom_method = bottom_cfg.get("method", "blackwell")
+        bottom_dataset = sv
+        if bottom_method == "blackwell":
+            bottom_dataset = ep.consolidate.add_splitbeam_angle(
+                sv,
+                ed,
+                waveform_mode=input_cfg["waveform_mode"],
+                encode_mode=input_cfg["encoding_mode"],
+                pulse_compression=True,
+                to_disk=False,
+            )
+        result["sv"] = sv
+        result["bottom"] = detect_bottom(
+            bottom_dataset,
+            method=bottom_method,
+            params=bottom_cfg.get("params", {}),
+        )
+        result["stages_completed"].append("bottom_detection")
+        result["surface"] = detect_surface(
+            sv,
+            method=cfg["surface"].get("method", "threshold"),
+            params=cfg["surface"],
+        )
+        result["stages_completed"].append("surface_detection")
         return result
-
-    result["pulse_compressed"] = pulse_compressed
-    result["stages_completed"].append("pulse_compression")
-
-    # Placeholder: actual Sv/Sp dataset selection needs to be connected here.
-    # Once the calibrated Sv DataArray is available, the following pattern is used:
-    # result["bottom"] = detect_bottom(
-    #     ed, method=cfg["bottom"]["method"], **cfg["bottom"]["params"]
-    # )
-    # result["surface"] = detect_surface(result["sv"], **cfg["surface"])
-    return result
+    finally:
+        ed.cleanup_swap_files()

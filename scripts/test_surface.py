@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from echopype_fm_std.config import load_config
+from echopype_fm_std.config import calibration_kwargs, load_config
 from echopype_fm_std.io import get_beam_group, open_raw
 from echopype_fm_std.surface import detect_surface
 
@@ -88,6 +88,7 @@ def process_file(raw_path: Path, config: dict, output_dir: Path, channel: int | 
             echo_data,
             waveform_mode=config["input"]["waveform_mode"],
             encode_mode=config["input"]["encoding_mode"],
+            **calibration_kwargs(config),
         )
         sv = sv_dataset["Sv"].assign_coords(echo_range=sv_dataset["echo_range"])
         surface = detect_surface(

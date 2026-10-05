@@ -39,7 +39,12 @@ Already available or demonstrated:
 - Per-run platform selection through the `--platform` command-line override;
   separate YAML files per platform are not required.
 - An xarray surface threshold/run-length implementation in `surface.py`.
-- A thin Echopype seafloor wrapper in `bottom.py`.
+- A calibrated Blackwell seafloor wrapper in `bottom.py`, returning a separate
+  `bottom_range(ping_time)` product and masking Echopype's no-intercept
+  sentinel. The pipeline now runs bottom detection immediately before the
+  separate surface/turbidity product, using the same calibrated `Sv`.
+- `scripts/inspect_bottom_interactive.py` provides a human-in-the-loop view of
+  the configured bottom detector for future tuning.
 - A validated FM prototype in `scripts/test_fm2.py`:
   - FM `Sp` calculation;
   - pulse-compressed split-beam angles;
@@ -199,6 +204,9 @@ outside `EchoData`.
 ### Phase 5: Bottom detection
 
 1. Keep `bottom.py` as the project boundary around `ep.mask.detect_seafloor()`.
+   Blackwell receives the calibrated `Sv` plus pulse-compressed split-beam
+   angles; the adapter supplies `depth` from `echo_range` because the current
+   RAW products expose acoustic range rather than absolute depth.
 2. Define a stable output schema, preferably a one-dimensional `bottom_range(ping_time)` in metres. Add `bottom_depth` only when the transducer-depth conversion is explicit and valid.
 3. Forward the configured method, threshold, channel, and other parameters without hiding them.
 4. Define how missing bottom values affect target filtering. Default behavior should preserve the quality state and avoid silently deleting all targets; strict mode may reject incomplete runs.
@@ -321,7 +329,7 @@ Create or update small scripts that exercise modules independently:
 1. `inspect_raw.py`: input dimensions, channels, timestamps, and configured transducer depth.
 2. `test_navigation.py`: SQLite loading and ping alignment diagnostics.
 3. `test_fm.py` or a replacement reference script: FM calibration, pulse compression, angles, and effective pulse duration.
-4. `test_bottom.py`: bottom output and coverage.
+4. `inspect_bottom_interactive.py`: optional visual inspection of bottom output.
 5. `test_surface.py`: surface output compared with reference cases and plotted against `Sv`.
 6. `test_single_target.py`: detector count, ranges, angles, and boundary filtering.
 7. `test_targets.py`: TS calculation, depth conversion, and exact CSV output.

@@ -18,6 +18,16 @@ navigation:
   extrapolate: false
   navigation_db: data/positions/sailbuoy_metadatabase.db
 
+environment:
+  temperature: 12
+  salinity: 8
+  pressure: 1.1325
+
+
+calibration:        #2023
+  gain_correction: 28.65
+  equivalent_beam_angle: -21
+
 surface:
   threshold_db: -77.0
   consecutive_samples: 3
@@ -36,8 +46,35 @@ surface:
   extreme_wave_size_m: 70.0
 
 bottom:
-  method: basic
-  params: {}
+  method: blackwell
+  params:
+    var_name: Sv
+    threshold: [-35.0, 0.03, 0.03]
+    offset: -1
+    r0: 5.0
+    r1: 100.0
+    wtheta: 28
+    wphi: 52
+    # Experimental Sv and bottom-line conditioning. "none" preserves the
+    # direct Blackwell result; promote alternatives only after validation.
+    preprocessing:
+      method: median_max
+      window: 3
+      median_window: 5
+      max_window: 5
+      max_gap: 3
+    postprocessing:
+      method: max_interpolate
+      window: 7
+      max_deviation_m: 10.0
+      max_gap: 7
+      # "linear" extrapolates leading/trailing gaps; 0 means no edge limit.
+      edge_fill: linear
+      max_edge_gap: 0
+    refinement:
+      enabled: true
+      window_m: 3.0
+      threshold_db: -45.0
 
 single_target:
   enabled: false
