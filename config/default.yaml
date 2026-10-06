@@ -50,7 +50,7 @@ bottom:
   params:
     var_name: Sv
     threshold: [-35.0, 0.03, 0.03]
-    offset: -1
+    offset: -1.5
     r0: 5.0
     r1: 100.0
     wtheta: 28
@@ -77,7 +77,7 @@ bottom:
       threshold_db: -45.0
 
 single_target:
-  enabled: false
+  enabled: true
   method: echoview_splitbeam_method2
   params:
     pldl_db: 6.0
@@ -88,7 +88,7 @@ single_target:
     max_sd_minor_deg: 0.2
     max_sd_major_deg: 0.2
     TS_comp_max: -10
-    TS_comp_min: -70
+    TS_comp_min: -60
     
     # Optional parameters
 
@@ -98,7 +98,17 @@ single_target:
     exclude_below_m: null
     allow_nans_inside_envelope: false
 
+echo_integration:
+  enabled: true
+  # Layers start at the detected sea surface and extend downward.
+  relative_to_surface: true
+  layer_size_m: 10.0
+  distance_bin_nmi: 0.1
 
 output:
   directory: "output"
+  images_directory: "images"
+  masks_directory: "masks"
+  targets_directory: "single_targets"
+  integration_directory: "integration"
   include_metadata_columns: false

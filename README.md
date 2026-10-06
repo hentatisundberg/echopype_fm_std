@@ -2,15 +2,23 @@
 
 A reproducible EK80 FM-mode processing pipeline built around [Echopype](https://github.com/echostack-org/echopype).
 
-The intended pipeline is:
+The full pipeline is:
 
 1. read one EK80 `.raw` file;
 2. align geographic position from a SQLite tracking database, filtered by `platform`;
-3. pulse-compress FM signals;
-4. detect seafloor;
-5. detect the surface/turbidity layer;
-6. perform single-target detection;
-7. export one row per target to CSV.
+3. calibrate the acoustic data to `Sv`;
+4. calculate the bottom boundary, including the configured Blackwell
+   conditioning and refinement;
+5. detect the surface/turbidity boundary;
+6. mask the water column to the surface-to-bottom envelope;
+7. calculate distance/depth-binned NASC echo integration;
+8. export the boundary summary and mask echograms;
+9. prepare pulse-compressed FM split-beam data and, when enabled, detect
+   single targets, calculate target strength, and export target rows to CSV.
+
+Echo integration and single-target detection are controlled independently in
+`config/default.yaml`. Integration is enabled by default; single-target
+detection is also enabled by default in the supplied configuration.
 
 The repository intentionally keeps project-specific code in `src/echopype_fm_std/` rather than modifying Echopype itself. Experimental FM single-target functionality from Echopype PR #1588 should be accessed through adapters in this repository, so the rest of the pipeline does not depend on an unstable upstream API.
 
@@ -42,7 +50,28 @@ echopype-fm inspect --raw /path/to/file.raw
 
 ## Configuration
 
-Copy and edit `config/default.yaml`. The `navigation.platform` value is required because the SQLite database contains positions for multiple platforms.
+Copy and edit `config/default.yaml`. The configuration controls the input
+beam group and FM encoding, calibration, navigation interpolation, surface
+and bottom detection, echo integration, single-target filtering, and output
+directories. The `navigation.platform` value is required because the SQLite
+database contains positions for multiple platforms; use the per-run
+`--platform` option when a file belongs to another platform.
+
+The supplied configuration uses:
+
+- `bottom.method: blackwell`, with the configured preprocessing,
+  postprocessing, and refinement settings;
+- surface/turbidity detection from calibrated `Sv`;
+- `echo_integration.enabled: true`, with 10 m depth bins and 0.1 nmi
+  distance bins;
+- `single_target.enabled: true`, with a default compensated target-strength
+  range of `-60 dB` to `-10 dB`;
+- `input.transducer_depth_m` to convert acoustic range to depth below the
+  sea surface for integration and target products.
+
+Set `echo_integration.enabled: false` to skip integration, or
+`single_target.enabled: false` to run the boundary, mask, and integration
+products without target detection.
 
 See which platform values are present in the database:
 
@@ -50,13 +79,101 @@ See which platform values are present in the database:
 echopype-fm nav-platforms --navigation-db /path/to/positions.sqlite
 ```
 
-Run the current starter pipeline:
+Run one RAW file with its navigation database and platform:
 
 ```bash
 echopype-fm run \
-  --raw /path/to/file.raw \
+  --raw data/raw/SLUAquaSailor2020V1-Phase0-D20260423-T070050-0.raw \
+  --navigation-db data/positions/sailbuoy_metadatabase.db \
+  --platform SAILOR2 \
   --config config/default.yaml
 ```
+
+Echo integration is enabled by default and writes
+`output/integration/<raw-stem>_echo_integration.csv`. It uses Echopype's
+`compute_NASC()` with fixed-depth bins below the sea surface and horizontal
+distance bins. The depth and distance bin sizes can be changed with
+`echo_integration.layer_size_m` and `echo_integration.distance_bin_nmi`
+(default `0.1`). Each CSV row represents one distance/depth cell and includes
+the cell NASC, variance, contributing ping count, sample count, binned ping
+time and position, plus survey start/end time. Empty cells, including cells
+below the detected bottom with no valid samples, are omitted from the CSV.
+
+To inspect a local RAW file before processing it:
+
+```bash
+echopype-fm inspect \
+  --raw data/raw/SLUAquaSailor2020V1-Phase0-D20260423-T070050-0.raw \
+  --config config/default.yaml
+```
+
+To process every RAW file in a folder, continue past files that fail while
+printing a summary at the end:
+
+```bash
+echopype-fm run-folder \
+  --raw-dir data/raw \
+  --navigation-db data/positions/sailbuoy_metadatabase.db \
+  --platform SAILOR2 \
+  --config config/default.yaml \
+  --continue-on-error
+```
+
+Use `--pattern '*.raw'` to select a different filename pattern. By default
+the command stops on the first failure; add `--continue-on-error` to process
+the remaining files and print failures at the end. Navigation for each
+database/platform pair is cached in memory for the duration of the process,
+while each RAW file is still time-windowed and interpolated independently.
+
+For a quick random-file smoke test, choose any `.raw` file in `data/raw/`,
+use `echopype-fm inspect` first, and confirm that its ping-time range overlaps
+the selected platform's navigation records. The full run requires that
+overlap, a valid surface detection, and a valid bottom detection.
+
+Single-target detection uses the same surface/seafloor exclusion mask as
+integration. It writes
+`output/single_targets/<raw-stem>_single_targets.csv`. The default compensated
+target-strength cutoff is `-60 dB`; override
+`single_target.params.TS_comp_min` in the YAML configuration or set
+`single_target.enabled: false` when testing only integration. Target rows
+include ping-specific position and repeated survey start/end metadata when
+the target export is produced.
+
+Each run also writes
+`output/masks/<raw-stem>_mask_summary.csv`, containing one row with maximum,
+mean, and variance of the surface-turbidity and bottom depths, plus survey
+start/end time and position. It writes
+`output/images/<raw-stem>_mask_echogram.png`: a calibrated `Sv`
+echogram with the surface and bottom lines and a semi-transparent grey
+overlay showing samples excluded by the mask. Detected targets are plotted as
+white crosses. A separate `output/images/<raw-stem>_mask_clean.png` contains
+only the raster image and mask overlay, without axes, titles, legends, or
+colorbars. Its pixel scale is based on elapsed time and physical depth, so
+longer surveys produce wider images rather than horizontally stretching the
+same fixed-size image.
+
+CSV products are separated into `output/masks`, `output/single_targets`, and
+`output/integration`. These directory names can be changed under `output` in
+the YAML configuration.
+
+For the default output settings, a successful run produces:
+
+```text
+output/
+├── images/
+│   ├── <raw-stem>_mask_echogram.png
+│   └── <raw-stem>_mask_clean.png
+├── masks/
+│   └── <raw-stem>_mask_summary.csv
+├── single_targets/
+│   └── <raw-stem>_single_targets.csv
+└── integration/
+    └── <raw-stem>_echo_integration.csv
+```
+
+The single-target CSV is produced only when single-target detection is
+enabled. The integration CSV is produced only when echo integration is
+enabled.
 
 The surface detector can be tested against all local RAW files and produces
 echogram overlays without replacing the retained `EchoData` object:
@@ -74,10 +191,11 @@ groups of ten samples, and applies a centered three-ping rolling maximum to
 conservatively bridge short gaps. The output directory contains one
 `*_surface.png` overlay per input RAW file.
 
-The FM calibration, bottom detector, FM angle calculation, target detector,
-target TS calculation, and final CSV writer have explicit adapter interfaces
-but are intentionally not guessed or reimplemented until they are tested
-against real FM data.
+The FM calibration, pulse-compressed split-beam angle calculation, target
+detector, target TS calculation, and CSV writers are implemented through
+project adapters around the pinned Echopype APIs. The experimental
+single-target detector remains isolated behind those adapters so the rest of
+the pipeline does not depend directly on unstable upstream interfaces.
 
 ### Bottom conditioning
 
@@ -209,14 +327,21 @@ The reader:
 - does not extrapolate outside the available navigation interval;
 - reports the fraction of acoustic pings with valid navigation.
 
-The navigation code deliberately does not call `EchoData.update_platform()`. This avoids coupling the project to the time-alignment path implicated by Echopype issue #1493.
+The pipeline attaches the aligned coordinates to `EchoData["Platform"]` using
+Echopype's `update_platform()` API. The aligned navigation dataset is also
+retained as a project-level diagnostic view and is used for integration and
+target-level position export.
 
 ## Development principle
 
 The stable internal interfaces should be:
 
 ```text
-RAW -> EchoData -> xarray datasets -> target dataset -> CSV
+RAW -> EchoData -> navigation/calibrated xarray datasets
+     -> boundaries and masks
+     -> NASC integration and/or target dataset
+     -> CSV and image products
 ```
 
-A target dataset should be the main scientific output. CSV is only an export format.
+The NASC dataset, boundary products, and target dataset are the scientific
+outputs. CSV and PNG files are export and diagnostic formats.

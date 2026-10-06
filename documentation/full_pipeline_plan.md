@@ -53,13 +53,6 @@ Already available or demonstrated:
   - Echopype TS calculation;
   - CSV export.
 
-Not yet complete:
-
-- A reusable FM adapter in `fm.py`.
-- A tested, Echopype-compatible surface/turbidity module with a defined scientific boundary contract.
-- Bottom and surface integration with target filtering.
-- Transducer-depth handling.
-- A stable target product and fully integrated pipeline.
 
 ## Scientific data conventions
 
@@ -345,10 +338,16 @@ Only after the modules above pass their focused checks:
 
 1. Replace the placeholder `run_pipeline()` with explicit calls to the validated modules.
 2. Use one shared `Sv` product for bottom and surface and one shared `Sp`/angle product for detection and TS.
-3. Return named products, completed stages, warnings, quality counts, and the output path.
-4. Move EchoData swap cleanup into pipeline-level `try/finally` while xarray is still available.
-5. Update the CLI to support full runs, configuration overrides, and clear stage-specific failures.
-6. Never emit a scientifically incomplete CSV after a failed or skipped stage.
+3. Integrate `Sv` in configurable layers relative to the detected sea surface
+   (10 m by default), masking samples above the surface and below the
+   detected seafloor. Export one row per ping/layer with ping time, latitude,
+   longitude, layer bounds, NASC, mean `Sv`, and sample count.
+4. Apply the same surface/seafloor envelope to `Sp` before single-target
+   detection; never detect targets from masked samples.
+5. Return named products, completed stages, warnings, quality counts, and the output path.
+6. Move EchoData swap cleanup into pipeline-level `try/finally` while xarray is still available.
+7. Update the CLI to support full runs, configuration overrides, and clear stage-specific failures.
+8. Never emit a scientifically incomplete CSV after a failed or skipped stage.
 
 ## Testing strategy
 

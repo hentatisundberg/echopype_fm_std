@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .batch import run_folder
 from .config import load_config
 from .io import inspect_raw
 from .navigation import list_platforms
@@ -26,6 +27,13 @@ def _parser() -> argparse.ArgumentParser:
         "--platform",
         help="Navigation platform for this RAW file; overrides navigation.platform",
     )
+    folder = sub.add_parser("run-folder", help="Run the pipeline for all RAW files in a folder")
+    folder.add_argument("--raw-dir", required=True)
+    folder.add_argument("--navigation-db", required=True)
+    folder.add_argument("--config", default="config/default.yaml")
+    folder.add_argument("--platform")
+    folder.add_argument("--pattern", default="*.raw")
+    folder.add_argument("--continue-on-error", action="store_true")
 
     platforms = sub.add_parser("nav-platforms", help="List platform names in a navigation database")
     platforms.add_argument("--navigation-db", required=True)
@@ -56,6 +64,22 @@ def main() -> None:
             print(f"Navigation coverage: {valid_pct:.2f}% of acoustic pings")
         if result.get("stages_pending"):
             print("Pending:", ", ".join(result["stages_pending"]))
+        return
+
+    if args.command == "run-folder":
+        results = run_folder(
+            args.raw_dir,
+            args.navigation_db,
+            args.config,
+            platform=args.platform,
+            pattern=args.pattern,
+            continue_on_error=args.continue_on_error,
+        )
+        for result in results:
+            print(
+                f"Completed {result['beam_group'].attrs.get('source_file', 'RAW')}: "
+                f"{', '.join(result['stages_completed'])}"
+            )
         return
 
     if args.command == "nav-platforms":

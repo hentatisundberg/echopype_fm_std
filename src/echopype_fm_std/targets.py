@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import xarray as xr
-
 
 CSV_COLUMNS = [
     "depth_m",
@@ -16,7 +13,29 @@ CSV_COLUMNS = [
 ]
 
 
-def build_target_properties(ds_targets: xr.Dataset, *, depth_name: str = "single_target_range") -> xr.Dataset:
+def filter_targets_by_ts(
+    ds_targets: xr.Dataset,
+    *,
+    ts_comp_min: float | None = None,
+    ts_comp_max: float | None = None,
+) -> xr.Dataset:
+    """Return targets within the compensated-TS limits."""
+    name = "compensated_TS" if "compensated_TS" in ds_targets else "TS_compensated_dB"
+    if name not in ds_targets and (ts_comp_min is not None or ts_comp_max is not None):
+        raise ValueError("Cannot filter targets: dataset has no compensated TS field.")
+    keep = xr.ones_like(ds_targets[name], dtype=bool)
+    if ts_comp_min is not None:
+        keep &= ds_targets[name] >= ts_comp_min
+    if ts_comp_max is not None:
+        keep &= ds_targets[name] <= ts_comp_max
+    return ds_targets.where(keep, drop=True)
+
+
+def build_target_properties(
+    ds_targets: xr.Dataset,
+    *,
+    depth_name: str = "single_target_range",
+) -> xr.Dataset:
     """Normalize target variables into the project schema.
 
     This stage currently standardizes names only; the scientifically sensitive
@@ -68,6 +87,8 @@ def export_targets_csv(
     include_metadata_columns: bool = False,
     ts_comp_min: float | None = None,
     ts_comp_max: float | None = None,
+    navigation: xr.Dataset | None = None,
+    survey_metadata: dict[str, object] | None = None,
 ) -> None:
     """Export one row per target, optionally filtered by compensated TS.
 
@@ -76,6 +97,14 @@ def export_targets_csv(
     available for later analysis.
     """
     frame = ds_targets.to_dataframe().reset_index(drop=True)
+    if navigation is not None and "ping_time" in frame:
+        nav_frame = navigation[["latitude", "longitude"]].to_dataframe().reset_index()
+        frame = frame.merge(nav_frame, on="ping_time", how="left")
+        frame = frame.rename(
+            columns={"latitude": "target_latitude", "longitude": "target_longitude"}
+        )
+    for name, value in (survey_metadata or {}).items():
+        frame[name] = value
 
     compensated_name = (
         "compensated_TS"
@@ -98,11 +127,20 @@ def export_targets_csv(
         column
         for column in [
             "ping_time",
+            "target_latitude",
+            "target_longitude",
+            "survey_start_time",
+            "survey_end_time",
+            "survey_start_latitude",
+            "survey_start_longitude",
+            "survey_end_latitude",
+            "survey_end_longitude",
             "single_target_range",
             "single_target_alongship_angle",
             "single_target_athwartship_angle",
             "uncompensated_TS",
             "compensated_TS",
+            "single_target_TS_comp_min_dB",
             *CSV_COLUMNS,
         ]
         if column in frame

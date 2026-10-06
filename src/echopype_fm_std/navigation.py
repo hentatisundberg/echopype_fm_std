@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -42,20 +43,8 @@ def read_navigation(
     if not platform or not platform.strip():
         raise ValueError("platform must be a non-empty string")
 
-    query = """
-        SELECT platform, survey_id, timestamp_utc, latitude, longitude,
-               distance_m, speed_ms, is_interpolated, source_file, created_at
-        FROM track_points
-        WHERE platform = ?
-        ORDER BY timestamp_utc
-    """
-
-    with sqlite3.connect(db_path) as con:
-        df = pd.read_sql_query(query, con, params=[platform])
-
-    missing = REQUIRED_COLUMNS - set(df.columns)
-    if missing:
-        raise ValueError(f"track_points is missing required columns: {sorted(missing)}")
+    df = _read_navigation_platform(str(db_path), platform)
+    df = df.copy()
 
     if df.empty:
         raise ValueError(f"No navigation records found for platform={platform!r}.")
@@ -86,8 +75,6 @@ def read_navigation(
 
     duplicate_count = int(df["timestamp"].duplicated().sum())
     if duplicate_count:
-        # The schema has UNIQUE(platform, timestamp_utc), but defensive handling
-        # protects against equivalent timestamps expressed in different text forms.
         df = df.drop_duplicates("timestamp", keep="last")
 
     if df["timestamp"].duplicated().any():
@@ -107,6 +94,26 @@ def read_navigation(
     )
 
     return ds
+
+
+@lru_cache(maxsize=32)
+def _read_navigation_platform(db_path: str, platform: str) -> pd.DataFrame:
+    """Load one platform's track once per process for batch processing."""
+    query = """
+        SELECT platform, survey_id, timestamp_utc, latitude, longitude,
+               distance_m, speed_ms, is_interpolated, source_file, created_at
+        FROM track_points
+        WHERE platform = ?
+        ORDER BY timestamp_utc
+    """
+
+    with sqlite3.connect(db_path) as con:
+        df = pd.read_sql_query(query, con, params=[platform])
+
+    missing = REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise ValueError(f"track_points is missing required columns: {sorted(missing)}")
+    return df
 
 
 def list_platforms(db_path: str | Path) -> list[str]:
