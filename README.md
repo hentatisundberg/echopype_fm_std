@@ -32,6 +32,7 @@ Create the environment:
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+export SETUPTOOLS_SCM_PRETEND_VERSION=0.11.1.dev0
 python -m pip install -e ".[dev]"
 ```
 
@@ -111,17 +112,25 @@ To process every RAW file in a folder, continue past files that fail while
 printing a summary at the end:
 
 ```bash
+
+# Copy recent version of metadatabase
+cp ../echoedge2/metadatabase/sailbuoy_metadatabase.db data/sailbuoy_m
+etadatabase.db
+
 echopype-fm run-folder \
-  --raw-dir data/raw \
-  --navigation-db data/positions/sailbuoy_metadatabase.db \
+  --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor2/Raw_data/2026 \
+  --navigation-db data/sailbuoy_metadatabase.db \
   --platform SAILOR2 \
   --config config/default.yaml \
+  --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor2/2026 \
   --continue-on-error
 ```
 
 Use `--pattern '*.raw'` to select a different filename pattern. By default
 the command stops on the first failure; add `--continue-on-error` to process
-the remaining files and print failures at the end. Navigation for each
+the remaining files and print failures at the end. Use `--output-dir PATH` to
+override `output.directory` from the configuration for this batch run.
+Navigation for each
 database/platform pair is cached in memory for the duration of the process,
 while each RAW file is still time-windowed and interpolated independently.
 

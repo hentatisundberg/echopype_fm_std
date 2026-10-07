@@ -33,6 +33,10 @@ def _parser() -> argparse.ArgumentParser:
     folder.add_argument("--config", default="config/default.yaml")
     folder.add_argument("--platform")
     folder.add_argument("--pattern", default="*.raw")
+    folder.add_argument(
+        "--output-dir",
+        help="Output directory; overrides output.directory in the configuration",
+    )
     folder.add_argument("--continue-on-error", action="store_true")
 
     platforms = sub.add_parser("nav-platforms", help="List platform names in a navigation database")
@@ -74,6 +78,7 @@ def main() -> None:
             platform=args.platform,
             pattern=args.pattern,
             continue_on_error=args.continue_on_error,
+            output_path=args.output_dir,
         )
         for result in results:
             print(

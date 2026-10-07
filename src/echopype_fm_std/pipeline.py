@@ -21,6 +21,7 @@ def run_pipeline(
     navigation_db: str | Path,
     config_path: str | Path,
     platform: str | None = None,
+    output_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run input, navigation, calibration, boundaries, and echo integration."""
     cfg = load_config(config_path)
@@ -89,7 +90,9 @@ def run_pipeline(
         result["stages_completed"].append("surface_detection")
         integration_cfg = cfg.get("echo_integration", {})
         output_cfg = cfg.get("output", {})
-        output_root = Path(output_cfg.get("directory", "output"))
+        output_root = Path(
+            output_path if output_path is not None else output_cfg.get("directory", "output")
+        )
         images_dir = output_root / output_cfg.get("images_directory", "images")
         masks_dir = output_root / output_cfg.get("masks_directory", "masks")
         targets_dir = output_root / output_cfg.get("targets_directory", "single_targets")

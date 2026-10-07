@@ -14,6 +14,7 @@ def run_folder(
     platform: str | None = None,
     pattern: str = "*.raw",
     continue_on_error: bool = False,
+    output_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Run the pipeline for every matching RAW file in one process."""
     raw_paths = sorted(Path(raw_directory).glob(pattern))
@@ -31,6 +32,7 @@ def run_folder(
                     navigation_db=navigation_db,
                     config_path=config_path,
                     platform=platform,
+                    output_path=output_path,
                 )
             )
         except Exception as exc:

@@ -12,7 +12,7 @@ input:
 navigation:
   # Default platform. For a RAW file from another platform, use the
   # per-run --platform override rather than maintaining another config file.
-  platform: SAILOR1
+  platform: SAILOR2
   interpolation: linear
   max_gap_seconds: null
   extrapolate: false
@@ -25,7 +25,7 @@ environment:
 
 
 calibration:        #2023
-  gain_correction: 28.65
+  gain_correction: 28.55
   equivalent_beam_angle: -21
 
 surface:
