@@ -108,6 +108,69 @@ echopype-fm inspect \
   --config config/default.yaml
 ```
 
+## Benchmarking pipeline speed
+
+Use the benchmark harness to measure wall-clock time for each production
+stage across several RAW files. It calls `run_pipeline()` directly, so the
+measurements include the same calibration, boundary, integration, target,
+and export code used in normal inference:
+
+```bash
+python test/benchmark_pipeline.py \
+  --raw-dir /path/to/raw \
+  --navigation-db data/sailbuoy_metadatabase.db \
+  --platform SAILOR2 \
+  --config config/default.yaml \
+  --limit 5 \
+  --report pipeline_benchmark.json
+```
+
+The command prints stage averages and writes JSON and CSV reports. Add
+`--repetitions 2` or more when storage/cache effects need to be separated,
+and add `--profile` for a `cProfile` report. Benchmark output is written to
+a temporary output directory unless `--output-dir` is supplied. The timing
+collector is opt-in and does not alter normal pipeline results.
+
+For a bottom-detector-only breakdown, including calibration, Blackwell input
+preparation, preprocessing, Echopype detection, postprocessing, and
+refinement, run:
+
+```bash
+python test/benchmark_bottom.py \
+  --raw-dir data/raw \
+  --config config/default.yaml \
+  --limit 4 \
+  --report bottom_benchmark.json
+```
+
+To compare the exact production detector with the optimized implementation
+and verify the resulting bottom line:
+
+```bash
+python test/benchmark_bottom_optimized.py \
+  --raw-dir data/raw \
+  --config config/default.yaml \
+  --limit 4 \
+  --report bottom_optimized_comparison.json
+```
+
+The optimized detector retains the reference Blackwell smoothing boundary
+behavior and does not decimate pings. It applies safe optimizations around
+that detector, including vectorized connected-component selection and
+range-local bottom extraction. On the four local RAW files, it produced
+identical bottom arrays (maximum difference `0 m` at `1e-6 m` tolerance) and
+reduced measured bottom-detector time from approximately `115.5 s` to
+`71.2 s` (`1.62x` overall). Results depend on file size, shape, and cache
+state; rerun the comparison after changing the detector or Echopype version.
+
+Prioritize the stages that dominate the report. Safe candidates to
+investigate are caching calibrated `Sv` and pulse-compressed intermediate
+datasets between reruns, avoiding duplicate materialization between bottom,
+integration, and target masks, and parallelizing independent RAW files at
+the process level after measuring memory use. Every optimization should
+compare boundary lines, integrated NASC cells, and target rows against an
+unoptimized reference before adoption.
+
 To process every RAW file in a folder, continue past files that fail while
 printing a summary at the end:
 

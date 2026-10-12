@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from time import perf_counter
+from typing import Any, MutableMapping
 
 import echopype as ep
 import numpy as np
 import xarray as xr
+from scipy.ndimage import generate_binary_structure
+from scipy.ndimage import label as ndimage_label
+from scipy.signal import convolve2d
 
 try:
     import bottleneck as bn
@@ -310,12 +314,238 @@ def refine_bottom_line(
     return tracked.copy(data=result).reindex_like(bottom)
 
 
+def _blackwell_uniform_angle_mask(
+    values: np.ndarray,
+    *,
+    window: int,
+    threshold: float,
+) -> np.ndarray:
+    """Return an exact Blackwell angle mask with the reference boundary rule."""
+    kernel = np.ones((window, window), dtype=float) / window**2
+    smoothed = convolve2d(values, kernel, mode="same", boundary="symm")
+    return smoothed**2 > threshold
+
+
+def _blackwell_optimized_core(
+    dataset: xr.Dataset,
+    *,
+    var_name: str,
+    channel: str,
+    threshold: float | list | tuple,
+    offset: float,
+    r0: float,
+    r1: float,
+    wtheta: int,
+    wphi: int,
+) -> xr.DataArray:
+    """Optimized NumPy implementation of Echopype's Blackwell detector."""
+    Sv_sel, depth_sel = _check_blackwell_inputs(
+        dataset,
+        var_name=var_name,
+        channel=channel,
+    )
+    tSv, ttheta, tphi = _parse_blackwell_thresholds_local(threshold)
+
+    Sv_values = Sv_sel.transpose("range_sample", "ping_time").to_numpy()
+    theta_values = (
+        dataset["angle_alongship"]
+        .sel(channel=channel)
+        .transpose("range_sample", "ping_time")
+        .to_numpy()
+    )
+    phi_values = (
+        dataset["angle_athwartship"]
+        .sel(channel=channel)
+        .transpose("range_sample", "ping_time")
+        .to_numpy()
+    )
+    depth_values = depth_sel.transpose("range_sample", "ping_time").to_numpy()
+    ping_time = Sv_sel.coords["ping_time"]
+
+    max_depth_per_ping = np.nanmax(depth_values, axis=0)
+    deepest_ping_idx = int(np.nanargmax(max_depth_per_ping))
+    ranges = depth_values[:, deepest_ping_idx]
+    r0_idx = int(np.nanargmin(np.abs(ranges - r0)))
+    r1_idx = int(np.nanargmin(np.abs(ranges - r1))) + 1
+
+    Sv_chunk = Sv_values[r0_idx:r1_idx]
+    angle_mask = _blackwell_uniform_angle_mask(
+        theta_values[r0_idx:r1_idx],
+        window=wtheta,
+        threshold=ttheta,
+    )
+    angle_mask |= _blackwell_uniform_angle_mask(
+        phi_values[r0_idx:r1_idx],
+        window=wphi,
+        threshold=tphi,
+    )
+
+    if angle_mask.any():
+        linear_values = np.power(10.0, Sv_chunk[angle_mask] / 10.0)
+        median_linear = np.nanmedian(linear_values)
+        sv_median = (
+            10.0 * np.log10(median_linear)
+            if np.isfinite(median_linear) and median_linear > 0
+            else np.inf
+        )
+        sv_median = max(sv_median, tSv)
+        sv_mask = Sv_chunk > sv_median
+        labels, _ = ndimage_label(
+            sv_mask,
+            structure=generate_binary_structure(2, 2),
+        )
+        intercepted = np.unique(labels[angle_mask])
+        intercepted = intercepted[intercepted != 0]
+        mask_chunk = np.isin(labels, intercepted)
+        first_match = np.argmax(mask_chunk, axis=0)
+        has_match = mask_chunk.any(axis=0)
+        bottom_depth = np.where(
+            has_match,
+            ranges[np.minimum(r0_idx + first_match, ranges.size - 1)] - offset,
+            ranges[0] - offset,
+        )
+    else:
+        bottom_depth = np.full(Sv_values.shape[1], ranges[0] - offset)
+
+    return xr.DataArray(
+        bottom_depth,
+        dims=["ping_time"],
+        coords={"ping_time": ping_time},
+        name="bottom_depth",
+        attrs={
+            "detector": "blackwell_optimized",
+            "threshold_Sv": float(tSv),
+            "threshold_angle_major": float(ttheta),
+            "threshold_angle_minor": float(tphi),
+            "offset_m": float(offset),
+            "channel": channel,
+        },
+    )
+
+
+def _check_blackwell_inputs(
+    dataset: xr.Dataset,
+    *,
+    var_name: str,
+    channel: str,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Validate and select the Blackwell input channel."""
+    if var_name not in dataset:
+        raise KeyError(f"{var_name!r} not found in dataset")
+    if "depth" not in dataset:
+        raise KeyError("'depth' variable not found in dataset")
+    if "channel" not in dataset.coords:
+        raise ValueError("Dataset must have 'channel' coordinate")
+    for name in ("angle_alongship", "angle_athwartship"):
+        if name not in dataset:
+            raise KeyError(f"Required variable {name!r} not found in dataset")
+    sv = dataset[var_name].sel(channel=channel)
+    depth = dataset["depth"].sel(channel=channel)
+    depth_ref = depth.isel(ping_time=0)
+    if not bool((abs(depth - depth_ref).max(dim="range_sample") < 1e-16).all()):
+        raise ValueError("Depth grid varies across ping_time for the selected channel.")
+    return sv, depth
+
+
+def _parse_blackwell_thresholds_local(
+    threshold: float | list | tuple,
+) -> tuple[float, float, float]:
+    """Parse Blackwell thresholds without depending on Echopype internals."""
+    if isinstance(threshold, (list, tuple)):
+        if len(threshold) == 3:
+            return float(threshold[0]), float(threshold[1]), float(threshold[2])
+        if len(threshold) == 2:
+            return float(threshold[0]), 702.0, 282.0
+        raise ValueError("`threshold` must have 1, 2, or 3 values")
+    if isinstance(threshold, (int, float)):
+        return float(threshold), 702.0, 282.0
+    raise TypeError("`threshold` must be float or tuple/list of 1–3 floats")
+
+
+def blackwell_optimized(
+    dataset: xr.Dataset,
+    *,
+    channel: str | None = None,
+    params: Mapping[str, object] | None = None,
+    timings: MutableMapping[str, float] | None = None,
+) -> xr.DataArray:
+    """Run an optimized Blackwell detector with production postprocessing.
+
+    The default path preserves the configured preprocessing, postprocessing,
+    refinement, offset, and search-range behavior. It does not decimate
+    pings, because decimation changes the input evidence and is therefore an
+    accuracy tradeoff rather than a drop-in optimization.
+    """
+    if not isinstance(dataset, xr.Dataset):
+        raise TypeError("dataset must be an xarray.Dataset")
+    if params is not None and not isinstance(params, Mapping):
+        raise TypeError("params must be a mapping")
+    options: dict[str, Any] = dict(params or {})
+    preprocessing = options.pop("preprocessing", None)
+    postprocessing = options.pop("postprocessing", None)
+    refinement = options.pop("refinement", None)
+    offset = float(options.pop("offset", 0.0))
+    if "channel" not in options:
+        if channel is not None:
+            options["channel"] = channel
+        elif "channel" in dataset.coords and dataset.sizes["channel"] == 1:
+            options["channel"] = str(dataset["channel"].values[0])
+        else:
+            raise ValueError("channel is required when the dataset has multiple channels")
+    if "var_name" not in options:
+        options["var_name"] = "Sv"
+    selected_channel = str(options["channel"])
+
+    if "depth" not in dataset:
+        if "echo_range" not in dataset:
+            raise ValueError("Blackwell bottom detection requires 'echo_range' or 'depth'")
+        dataset = dataset.assign(depth=dataset["echo_range"])
+
+    refinement_dataset = dataset
+    started = perf_counter()
+    prepared = preprocess_bottom_dataset(dataset, options=preprocessing)
+    if timings is not None:
+        timings["preprocessing"] = perf_counter() - started
+
+    started = perf_counter()
+    detected = _blackwell_optimized_core(
+        prepared,
+        var_name=str(options["var_name"]),
+        channel=selected_channel,
+        threshold=options.get("threshold", -75),
+        offset=0.3,
+        r0=float(options.get("r0", 0.0)),
+        r1=float(options.get("r1", 500.0)),
+        wtheta=int(options.get("wtheta", 28)),
+        wphi=int(options.get("wphi", 52)),
+    )
+    r0 = float(options.get("r0", 0.0))
+    detected = detected.where(detected > r0)
+    if timings is not None:
+        timings["optimized_detection"] = perf_counter() - started
+
+    started = perf_counter()
+    detected = postprocess_bottom_line(detected, options=postprocessing)
+    if timings is not None:
+        timings["postprocessing"] = perf_counter() - started
+    started = perf_counter()
+    detected = refine_bottom_line(refinement_dataset, detected, options=refinement)
+    if timings is not None:
+        timings["refinement"] = perf_counter() - started
+    if offset:
+        detected = detected + offset
+    detected.name = "bottom_range"
+    detected.attrs["vertical_coordinate"] = "echo_range"
+    return detected
+
+
 def detect_bottom(
     dataset: xr.Dataset,
     *,
     channel: str | None = None,
     method: str = "blackwell",
     params: Mapping[str, object] | None = None,
+    timings: MutableMapping[str, float] | None = None,
 ) -> xr.DataArray:
     """Detect a separate bottom range line from a calibrated Echopype dataset.
 
@@ -352,14 +582,29 @@ def detect_bottom(
         dataset = dataset.assign(depth=dataset["echo_range"])
 
     refinement_dataset = dataset
+    started = perf_counter()
     dataset = preprocess_bottom_dataset(dataset, options=preprocessing)
+    if timings is not None:
+        timings["preprocessing"] = perf_counter() - started
+
+    started = perf_counter()
     detected = ep.mask.detect_seafloor(dataset, method=method, params=options)
+    if timings is not None:
+        timings["echopype_detection"] = perf_counter() - started
     if method == "blackwell":
         r0 = float(options.get("r0", 0.0))
         no_intercept = detected <= r0 + 1e-9
         detected = detected.where(~no_intercept)
+
+    started = perf_counter()
     detected = postprocess_bottom_line(detected, options=postprocessing)
+    if timings is not None:
+        timings["postprocessing"] = perf_counter() - started
+
+    started = perf_counter()
     detected = refine_bottom_line(refinement_dataset, detected, options=refinement)
+    if timings is not None:
+        timings["refinement"] = perf_counter() - started
     if offset:
         detected = detected + offset
     detected.name = "bottom_range"
