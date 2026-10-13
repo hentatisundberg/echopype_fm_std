@@ -80,6 +80,8 @@ def main() -> None:
             continue_on_error=args.continue_on_error,
             output_path=args.output_dir,
         )
+        if not results:
+            print("No files were processed.")
         for result in results:
             print(
                 f"Completed {result['beam_group'].attrs.get('source_file', 'RAW')}: "

@@ -193,6 +193,10 @@ Use `--pattern '*.raw'` to select a different filename pattern. By default
 the command stops on the first failure; add `--continue-on-error` to process
 the remaining files and print failures at the end. Use `--output-dir PATH` to
 override `output.directory` from the configuration for this batch run.
+Before processing, `run-folder` checks the configured target output directory
+(`output/single_targets` by default) for
+`<raw-stem>_single_targets.csv` files and skips RAW files whose target output
+already exists. This makes it safe to resume an interrupted batch run.
 Navigation for each
 database/platform pair is cached in memory for the duration of the process,
 while each RAW file is still time-windowed and interpolated independently.
