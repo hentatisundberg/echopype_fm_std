@@ -189,6 +189,39 @@ echopype-fm run-folder \
   --continue-on-error
 ```
 
+
+# First step parallellism 
+# P2 means 2 workers 
+
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/jonas/Documents/vscode/echopype_fm_std/.venv/bin/echopype-fm run-folder   --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor1/Raw_data/2025   --navigation-db data/sailbuoy_metadatabase.db   --platform SAILOR1   --config config/default.yaml   --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor1/2025   --workers 4   --continue-on-error
+
+
+Use `--workers N` to process up to `N` independent RAW files concurrently
+using separate processes. Start with `--workers 2` or `--workers 4`, then
+increase it only after checking peak memory and storage throughput. Each
+worker opens and cleans up its own RAW file, and output files remain separate
+per RAW stem. The default is one worker. When using multiple workers, limit
+native numerical-library threads to avoid oversubscription:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+  echopype-fm run-folder \
+    --raw-dir /path/to/raw \
+    --navigation-db data/sailbuoy_metadatabase.db \
+    --platform SAILOR2 \
+    --config config/default.yaml \
+    --output-dir /path/to/output \
+    --workers 2 \
+    --continue-on-error
+```
+
+The folder runner keeps only a compact completion summary for each file; the
+large in-memory Echopype and xarray datasets are released after that file
+finishes. This is important for long serial batches as well as parallel runs.
+When diagnosing memory use on Linux, monitor the process resident memory and
+`MemAvailable`, not only the `free` column in `top`: Linux may use otherwise
+free RAM for filesystem cache without indicating a pipeline leak.
+
 Use `--pattern '*.raw'` to select a different filename pattern. By default
 the command stops on the first failure; add `--continue-on-error` to process
 the remaining files and print failures at the end. Use `--output-dir PATH` to

@@ -37,6 +37,12 @@ def _parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Output directory; overrides output.directory in the configuration",
     )
+    folder.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of RAW files to process concurrently (default: 1)",
+    )
     folder.add_argument("--continue-on-error", action="store_true")
 
     platforms = sub.add_parser("nav-platforms", help="List platform names in a navigation database")
@@ -79,12 +85,13 @@ def main() -> None:
             pattern=args.pattern,
             continue_on_error=args.continue_on_error,
             output_path=args.output_dir,
+            workers=args.workers,
         )
         if not results:
             print("No files were processed.")
         for result in results:
             print(
-                f"Completed {result['beam_group'].attrs.get('source_file', 'RAW')}: "
+                f"Completed {result.get('source_file', result.get('raw_path', 'RAW'))}: "
                 f"{', '.join(result['stages_completed'])}"
             )
         return

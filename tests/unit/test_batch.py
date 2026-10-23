@@ -41,3 +41,24 @@ def test_run_folder_skips_raw_files_with_existing_target_output(tmp_path, monkey
 
     assert calls == [pending_raw]
     assert [result["raw_path"] for result in results] == [pending_raw]
+    assert "echo_data" not in results[0]
+
+
+def test_run_folder_rejects_nonpositive_worker_count(tmp_path):
+    raw_directory = tmp_path / "raw"
+    raw_directory.mkdir()
+    (raw_directory / "sample.raw").touch()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("navigation:\n  platform: TEST\n", encoding="utf-8")
+
+    try:
+        batch.run_folder(
+            raw_directory,
+            tmp_path / "navigation.db",
+            config_path,
+            workers=0,
+        )
+    except ValueError as exc:
+        assert str(exc) == "workers must be at least 1."
+    else:
+        raise AssertionError("run_folder should reject workers=0")
