@@ -70,6 +70,25 @@ The supplied configuration uses:
 - `input.transducer_depth_m` to convert acoustic range to depth below the
   sea surface for integration and target products.
 
+For data with strong schools, the legacy fast Sailor detector from
+[`echoedge2/lib/find_bottom.py`](https://github.com/hentatisundberg/echoedge2/blob/main/lib/find_bottom.py)
+can be selected without changing the later masking or analysis stages:
+
+```yaml
+bottom:
+  method: legacy
+  params:
+    window_size: 10
+    hardness_thresh: -50.0
+    offset: 2.0
+```
+
+The legacy detector is applied to calibrated `Sv`; its detected sample
+indices are converted to `bottom_range`. A positive `offset` moves that line
+shallower by the specified number of metres. The resulting line is then used
+by the existing surface-to-bottom masks, integration, and single-target
+workflow. The default `blackwell` method is unchanged.
+
 Set `echo_integration.enabled: false` to skip integration, or
 `single_target.enabled: false` to run the boundary, mask, and integration
 products without target detection.
@@ -181,11 +200,11 @@ cp ../echoedge2/metadatabase/sailbuoy_metadatabase.db data/sailbuoy_m
 etadatabase.db
 
 echopype-fm run-folder \
-  --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor2/Raw_data/2026 \
+  --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor1/Raw_data/2024 \
   --navigation-db data/sailbuoy_metadatabase.db \
-  --platform SAILOR2 \
+  --platform SAILOR1 \
   --config config/default.yaml \
-  --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor2/2026 \
+  --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor1/2024 \
   --continue-on-error
 ```
 
@@ -193,7 +212,7 @@ echopype-fm run-folder \
 # First step parallellism 
 # P2 means 2 workers 
 
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/jonas/Documents/vscode/echopype_fm_std/.venv/bin/echopype-fm run-folder   --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor1/Raw_data/2025   --navigation-db data/sailbuoy_metadatabase.db   --platform SAILOR1   --config config/default.yaml   --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor1/2025   --workers 4   --continue-on-error
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/jonas/Documents/vscode/echopype_fm_std/.venv/bin/echopype-fm run-folder   --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor2/Raw_data/2026   --navigation-db data/sailbuoy_metadatabase.db   --platform SAILOR1   --config config/default.yaml   --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor2/2026   --workers 8   --continue-on-error
 
 
 Use `--workers N` to process up to `N` independent RAW files concurrently

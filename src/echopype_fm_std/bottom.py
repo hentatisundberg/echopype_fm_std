@@ -11,6 +11,8 @@ from scipy.ndimage import generate_binary_structure
 from scipy.ndimage import label as ndimage_label
 from scipy.signal import convolve2d
 
+from .legacy_bottom import find_bottom as find_legacy_bottom
+
 try:
     import bottleneck as bn
 except ImportError:  # pragma: no cover - xarray remains the reference fallback
@@ -537,6 +539,77 @@ def blackwell_optimized(
     detected.name = "bottom_range"
     detected.attrs["vertical_coordinate"] = "echo_range"
     return detected
+
+
+def legacy_bottom(
+    dataset: xr.Dataset,
+    *,
+    channel: str | None = None,
+    params: Mapping[str, object] | None = None,
+) -> xr.DataArray:
+    """Adapt echoedge2's legacy Sailor detector to a bottom-range line."""
+    if not isinstance(dataset, xr.Dataset):
+        raise TypeError("dataset must be an xarray.Dataset")
+    if params is not None and not isinstance(params, Mapping):
+        raise TypeError("params must be a mapping")
+    options: dict[str, Any] = dict(params or {})
+    var_name = str(options.pop("var_name", "Sv"))
+    window_size = int(options.pop("window_size", 10))
+    hardness_thresh = float(options.pop("hardness_thresh", -50.0))
+    offset = float(options.pop("offset", 0.0))
+    if options:
+        unexpected = ", ".join(sorted(options))
+        raise ValueError(f"Unsupported legacy bottom parameters: {unexpected}")
+    if window_size < 1:
+        raise ValueError("legacy bottom window_size must be >= 1")
+    if not np.isfinite(offset):
+        raise ValueError("legacy bottom offset must be finite")
+    if var_name not in dataset:
+        raise KeyError(f"{var_name!r} not found in dataset")
+    values = dataset[var_name]
+    if "channel" in values.dims:
+        if channel is None:
+            if values.sizes["channel"] != 1:
+                raise ValueError("channel is required when the dataset has multiple channels")
+            values = values.isel(channel=0)
+        else:
+            values = values.sel(channel=channel)
+    if "ping_time" not in values.dims:
+        raise ValueError("legacy bottom detection requires a 'ping_time' dimension")
+    range_dims = [dim for dim in values.dims if dim != "ping_time"]
+    if len(range_dims) != 1:
+        raise ValueError("legacy bottom detection requires one range dimension")
+    range_dim = range_dims[0]
+    values = values.transpose(range_dim, "ping_time").load().to_numpy()
+    depth, _, _, _ = find_legacy_bottom(values, window_size, hardness_thresh)
+
+    if "echo_range" not in dataset:
+        raise ValueError("legacy bottom detection requires 'echo_range'")
+    ranges = dataset["echo_range"]
+    if "channel" in ranges.dims:
+        ranges = (
+            ranges.isel(channel=0)
+            if channel is None
+            else ranges.sel(channel=channel)
+        )
+    ranges = ranges.transpose(range_dim, "ping_time").load().to_numpy()
+    depth_array = np.asarray(depth, dtype=int)
+    valid = (depth_array >= 0) & (depth_array < ranges.shape[0])
+    bottom = np.full(depth_array.shape, np.nan, dtype=float)
+    bottom[valid] = ranges[depth_array[valid], np.arange(ranges.shape[1])[valid]]
+    if offset:
+        bottom[valid] -= offset
+    return xr.DataArray(
+        bottom,
+        dims=["ping_time"],
+        coords={"ping_time": dataset["ping_time"]},
+        name="bottom_range",
+        attrs={
+            "vertical_coordinate": "echo_range",
+            "detector": "echoedge_legacy",
+            "offset_m": offset,
+        },
+    )
 
 
 def detect_bottom(

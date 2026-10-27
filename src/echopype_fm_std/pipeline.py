@@ -7,7 +7,7 @@ from typing import Any, Iterator, MutableMapping
 
 import echopype as ep
 
-from .bottom import blackwell_optimized, detect_bottom
+from .bottom import blackwell_optimized, detect_bottom, legacy_bottom
 from .config import calibration_kwargs, load_config
 from .integration import export_integration_csv, integrate_echoes
 from .io import get_beam_group, open_raw
@@ -106,6 +106,11 @@ def run_pipeline(
             if bottom_method == "blackwell":
                 result["bottom"] = blackwell_optimized(
                     bottom_dataset,
+                    params=bottom_cfg.get("params", {}),
+                )
+            elif bottom_method in {"legacy", "echoedge"}:
+                result["bottom"] = legacy_bottom(
+                    sv,
                     params=bottom_cfg.get("params", {}),
                 )
             else:

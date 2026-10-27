@@ -5,6 +5,7 @@ import xarray as xr
 
 from echopype_fm_std.bottom import (
     detect_bottom,
+    legacy_bottom,
     postprocess_bottom_line,
     preprocess_bottom_dataset,
     refine_bottom_line,
@@ -43,6 +44,32 @@ def test_blackwell_adds_depth_and_masks_no_intercept_sentinel():
     assert "offset" not in detect.call_args.kwargs["params"]
     assert out.name == "bottom_range"
     np.testing.assert_allclose(out.values, [np.nan, 2.5], equal_nan=True)
+
+
+def test_legacy_bottom_converts_detector_indices_to_echo_range():
+    dataset = xr.Dataset(
+        {
+            "Sv": (("channel", "ping_time", "range_sample"), np.zeros((1, 2, 4))),
+            "echo_range": (
+                ("channel", "ping_time", "range_sample"),
+                [[[10, 20, 30, 40], [11, 21, 31, 41]]],
+            ),
+        },
+        coords={"channel": ["ch0"], "ping_time": [0, 1], "range_sample": range(4)},
+    )
+    with patch(
+        "echopype_fm_std.bottom.find_legacy_bottom",
+        return_value=([2, 4], np.array([-20, -20]), 0, np.zeros((4, 2))),
+    ):
+        out = legacy_bottom(
+            dataset,
+            params={"window_size": 3, "hardness_thresh": -50, "offset": 2.5},
+        )
+
+    np.testing.assert_allclose(out.values, [27.5, np.nan], equal_nan=True)
+    assert out.name == "bottom_range"
+    assert out.attrs["detector"] == "echoedge_legacy"
+    assert out.attrs["offset_m"] == 2.5
 
 
 def test_bottom_requires_channel_for_multiple_channels():

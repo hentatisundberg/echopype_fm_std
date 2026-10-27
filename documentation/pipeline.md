@@ -62,5 +62,10 @@ PYTHONPATH=src python test/benchmark_bottom_optimized.py \
 ```
 
 For an explicit non-Blackwell method, set `bottom.method` in the YAML
-configuration. Such methods continue to use the general `detect_bottom()`
-adapter.
+configuration. The legacy Sailor detector from
+[`echoedge2/lib/find_bottom.py`](https://github.com/hentatisundberg/echoedge2/blob/main/lib/find_bottom.py)
+is available with `bottom.method: legacy`; it accepts `window_size` and
+`hardness_thresh` parameters. Its `offset` parameter is in metres; positive
+values move the converted bottom range shallower. The resulting line feeds
+the same masking, integration, and target stages. Other methods continue to
+use the general `detect_bottom()` adapter.

@@ -45,36 +45,43 @@ surface:
   layer_minimum_samples: 10
   extreme_wave_size_m: 70.0
 
+# To use the fast legacy echoedge2 Sailor detector instead, set
+# method: legacy and configure its detector parameters below.
 bottom:
-  method: blackwell
+  method: legacy # alt: blackwell
   params:
-    var_name: Sv
-    threshold: [-35.0, 0.03, 0.03]
-    offset: -1.5
-    r0: 5.0
-    r1: 100.0
-    wtheta: 28
-    wphi: 52
+    window_size: 10         # for legacy detector
+    hardness_thresh: -50.0  # for legacy detector
+    offset: 2.0             # metres shallower than the detected bottom
+    #var_name: Sv
+    #threshold: [-35.0, 0.03, 0.03]
+    #offset: -1.5
+    #r0: 5.0
+    #r1: 100.0
+    #wtheta: 28
+    #wphi: 52
     # Experimental Sv and bottom-line conditioning. "none" preserves the
     # direct Blackwell result; promote alternatives only after validation.
-    preprocessing:
-      method: median_max
-      window: 3
-      median_window: 5
-      max_window: 5
-      max_gap: 3
-    postprocessing:
-      method: max_interpolate
-      window: 7
-      max_deviation_m: 10.0
-      max_gap: 7
+    #preprocessing:
+    #  method: median_max
+    #  window: 3
+    #  median_window: 5
+    #  max_window: 5
+    #  max_gap: 3
+    #postprocessing:
+    #  method: max_interpolate
+    #  window: 7
+    #  max_deviation_m: 10.0
+    #  max_gap: 7
       # "linear" extrapolates leading/trailing gaps; 0 means no edge limit.
-      edge_fill: linear
-      max_edge_gap: 0
-    refinement:
-      enabled: true
-      window_m: 3.0
-      threshold_db: -45.0
+    #  edge_fill: linear
+    #  max_edge_gap: 0
+    #refinement:
+    #  enabled: true
+    #  window_m: 3.0
+    #  threshold_db: -45.0
+
+    # For method: legacy, use:
 
 single_target:
   enabled: true
