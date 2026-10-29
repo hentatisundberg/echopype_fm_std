@@ -48,6 +48,7 @@ output/*
 *.swp
 *.tmp
 *.log
+*.raw
 
 # Local editor and tool settings
 .vscode/

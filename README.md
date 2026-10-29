@@ -404,9 +404,42 @@ conditioning effects can be compared against the unmodified signal. File
 loading and detector calculations run in the background so the window remains
 interactive; the status line reports final-line coverage.
 `Previous` and `Next` navigate through files passed with repeated `--raw`
-arguments, and `Save YAML` writes the current parameters to the output
-directory without modifying the main configuration. The y-axis is the
-physical echo range in metres.
+arguments. A navigation request made while a file is loading is queued, and
+only the latest detector calculation is retained. The preview mesh is bounded
+in both dimensions for responsive rendering; detection still runs on the full
+dataset. A newly loaded echogram is displayed before bottom detection
+finishes, so navigation does not wait for the overlay calculation. `Save YAML`
+writes the current parameters to the output directory without modifying the
+main configuration. The y-axis is the physical echo range in metres.
+
+### Interactive surface/turbidity inspection
+
+For human-in-the-loop tuning of the surface/turbidity detector, use:
+
+```bash
+python scripts/inspect_surface_interactive.py \
+  --raw data/raw/SLUAquaSailor2020V1-Phase0-D20260503-T061158-1.raw
+```
+
+To inspect every RAW file in a folder, use `--folder` instead:
+
+```bash
+python scripts/inspect_surface_interactive.py \
+  --folder data/raw
+```
+
+The inspector loads the configured calibration and displays the calibrated
+`Sv` echogram with the detected surface/turbidity boundary overlaid. Its
+controls cover all parameters in the `surface` section of
+`config/default.yaml`, including the original wave logic thresholds. `Apply`
+recalculates the boundary in the background; `Previous` and `Next` navigate
+files passed with repeated `--raw` or `--folder` arguments, and `Save YAML`
+writes the current `surface` parameters to the output directory as a
+`*_surface_params.yaml` file without changing the main configuration. Use
+`--channel` with a channel label or zero-based channel index when the RAW file
+contains multiple channels. The Matplotlib toolbar below the echogram provides
+Home, Back, Forward, Pan, Zoom, and Save controls; the current view is
+preserved when the detector is recalculated.
 
 ## Experimental Echopype branch
 
