@@ -1,4 +1,11 @@
-"""Interactively inspect Blackwell bottom parameters for one RAW file at a time."""
+"""Interactively inspect Blackwell bottom parameters 
+for one RAW file at a time.
+
+python scripts/inspect_bottom_interactive.py \
+    --raw /data/raw_tricky_bottom/ \
+    --output /output/surface_interactive/
+"""
+
 
 from __future__ import annotations
 
@@ -13,7 +20,7 @@ import echopype as ep
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 from echopype_fm_std.bottom import (
     detect_bottom,
@@ -168,6 +175,8 @@ class BottomInspector:
 
         self.figure, self.axis = plt.subplots(figsize=(10, 7))
         self.canvas = FigureCanvasTkAgg(self.figure, master=plot_frame)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
+        self.toolbar.update()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.image = None
         self._raw_line, = self.axis.plot([], [], color="white", linewidth=1.0, alpha=0.8)
@@ -488,19 +497,48 @@ class BottomInspector:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--raw", type=Path, action="append")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "output/bottom-interactive")
+    parser.add_argument(
+        "--raw",
+        type=Path,
+        action="append",
+        help="RAW file or folder to inspect; repeat this option.",
+    )
+    parser.add_argument(
+        "--folder",
+        type=Path,
+        action="append",
+        help="Folder containing RAW files; repeat this option.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        "--output",
+        type=Path,
+        default=ROOT / "output/bottom-interactive",
+    )
     args = parser.parse_args()
     config = load_config(CONFIG)
-    raw_paths = [
-        path if path.is_absolute() else ROOT / path
-        for path in (args.raw or sorted((ROOT / "data/raw_tricky_bottom").glob("*.raw")))
-    ]
+    raw_paths = _raw_paths(args.raw, args.folder)
     if not raw_paths:
-        parser.error("No RAW files found. Pass one or more --raw paths.")
+        parser.error("No RAW files found. Pass --raw FILE or --folder DIRECTORY.")
     root = tk.Tk()
     BottomInspector(root, raw_paths, config, args.output_dir)
     root.mainloop()
+
+
+def _raw_paths(
+    raw_values: list[Path] | None,
+    folder_values: list[Path] | None,
+) -> list[Path]:
+    paths: list[Path] = []
+    for value in [*(raw_values or []), *(folder_values or [])]:
+        path = value if value.is_absolute() else ROOT / value
+        if path.is_dir():
+            paths.extend(sorted(path.glob("*.raw")))
+        elif path.is_file():
+            paths.append(path)
+    if not raw_values and not folder_values:
+        paths = sorted((ROOT / "data/raw_tricky_bottom").glob("*.raw"))
+    return list(dict.fromkeys(paths))
 
 
 if __name__ == "__main__":
