@@ -351,14 +351,16 @@ echopype-fm run-folder \
 # First step parallellism 
 # P2 means 2 workers 
 
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/jonas/Documents/vscode/echopype_fm_std/.venv/bin/echopype-fm run-folder   --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor2/Raw_data/2026   --navigation-db data/sailbuoy_metadatabase.db   --platform SAILOR1   --config config/default.yaml   --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/EchopypeV2/SLU_Sailor2/2026   --workers 8   --continue-on-error
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/jonas/Documents/vscode/echopype_fm_std/.venv/bin/echopype-fm run-folder   --raw-dir ../../../../../mnt/BSP_NAS2/Acoustics/SLU_Sailor1/Raw_data/2026   --navigation-db data/sailbuoy_metadatabase.db   --platform SAILOR1   --config config/default3.yaml   --output-dir ../../../../../mnt/BSP_NAS2_work/Acoustics_output_data/SLU_Sailor1/2026   --workers 16   --continue-on-error
 
 
 Use `--workers N` to process up to `N` independent RAW files concurrently
 using separate processes. Start with `--workers 2` or `--workers 4`, then
 increase it only after checking peak memory and storage throughput. Each
-worker opens and cleans up its own RAW file, and output files remain separate
-per RAW stem. The default is one worker. When using multiple workers, limit
+worker opens and cleans up its own RAW file. Each batch is written to one
+uniquely named directory such as `amber-47`, with output files grouped in the
+configured image, mask, target, and integration subdirectories. The default is
+one worker. When using multiple workers, limit
 native numerical-library threads to avoid oversubscription:
 
 ```bash
@@ -385,9 +387,12 @@ the command stops on the first failure; add `--continue-on-error` to process
 the remaining files and print failures at the end. Use `--output-dir PATH` to
 override `output.directory` from the configuration for this batch run.
 Before processing, `run-folder` checks the configured target output directory
-(`output/single_targets` by default) for
-`<raw-stem>_single_targets.csv` files and skips RAW files whose target output
-already exists. This makes it safe to resume an interrupted batch run.
+(`output/single_targets` by default) inside a previous run directory whose
+saved `config.yaml` matches the current configuration. It skips RAW files whose
+target output already exists there, making it safe to resume an interrupted
+batch run. If no matching configuration is found, a new run directory is
+created and all RAW files are processed, allowing the same data to be rerun
+with different parameters.
 Navigation for each
 database/platform pair is cached in memory for the duration of the process,
 while each RAW file is still time-windowed and interpolated independently.

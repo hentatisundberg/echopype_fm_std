@@ -1,40 +1,108 @@
 from __future__ import annotations
 
+import fcntl
 import multiprocessing
+import secrets
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from shutil import copy2
+from typing import Any, Iterator
 
 from .config import load_config
 from .pipeline import run_pipeline
 
+_BATCH_RUN_WORDS = (
+    "amber",
+    "cedar",
+    "coral",
+    "dawn",
+    "fern",
+    "harbor",
+    "lumen",
+    "meadow",
+    "pebble",
+    "raven",
+)
 
-def _target_output_directory(
-    config_path: str | Path,
+
+def _create_batch_output_directory(
     output_path: str | Path | None,
+    config_path: str | Path,
 ) -> Path:
     cfg = load_config(config_path)
     output_cfg = cfg.get("output", {})
-    output_root = Path(
+    output_parent = Path(
         output_path if output_path is not None else output_cfg.get("directory", "output")
     )
-    return output_root / output_cfg.get("targets_directory", "single_targets")
+    output_parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        run_name = f"{secrets.choice(_BATCH_RUN_WORDS)}-{secrets.randbelow(90) + 10}"
+        output_directory = output_parent / run_name
+        try:
+            output_directory.mkdir()
+        except FileExistsError:
+            continue
+        copy2(config_path, output_directory / "config.yaml")
+        return output_directory
+
+
+@contextmanager
+def _run_directory_lock(output_parent: Path) -> Iterator[None]:
+    output_parent.mkdir(parents=True, exist_ok=True)
+    with (output_parent / ".echopype-fm-run.lock").open("w") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _target_output_directory(
+    output_directory: Path,
+    config_path: str | Path,
+) -> Path:
+    cfg = load_config(config_path)
+    output_cfg = cfg.get("output", {})
+    return output_directory / output_cfg.get("targets_directory", "single_targets")
+
+
+def _output_parent(
+    output_path: str | Path | None,
+    config_path: str | Path,
+) -> Path:
+    cfg = load_config(config_path)
+    output_cfg = cfg.get("output", {})
+    return Path(
+        output_path if output_path is not None else output_cfg.get("directory", "output")
+    )
+
+
+def _find_matching_run_directory(
+    output_parent: Path,
+    config_path: str | Path,
+) -> Path | None:
+    current_config = load_config(config_path, validate_platform=False)
+    if not output_parent.exists():
+        return None
+    saved_configs = sorted(output_parent.rglob("config.yaml"), reverse=True)
+    for saved_config in saved_configs:
+        candidate = saved_config.parent
+        try:
+            if load_config(saved_config, validate_platform=False) == current_config:
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _target_output_path(
     target_directory: Path,
     raw_path: Path,
 ) -> Path | None:
-    """Find a completion marker in the current or a versioned output root."""
+    """Find a completion marker in one specific run directory."""
     target_path = target_directory / f"{raw_path.stem}_single_targets.csv"
-    if target_path.exists():
-        return target_path
-    for candidate in target_directory.parent.glob(
-        f"*/{target_directory.name}/{raw_path.stem}_single_targets.csv"
-    ):
-        if candidate.exists():
-            return candidate
-    return None
+    return target_path if target_path.exists() else None
 
 
 def _run_pipeline_worker(
@@ -43,6 +111,7 @@ def _run_pipeline_worker(
     config_path: str | Path,
     platform: str | None,
     output_path: str | Path | None,
+    output_directory: str | Path,
 ) -> dict[str, Any]:
     result = run_pipeline(
         raw_path=raw_path,
@@ -50,6 +119,7 @@ def _run_pipeline_worker(
         config_path=config_path,
         platform=platform,
         output_path=output_path,
+        output_directory=output_directory,
     )
     beam_group = result.get("beam_group")
     source_file = (
@@ -92,18 +162,36 @@ def run_folder(
         raise FileNotFoundError(
             f"No RAW files matching {pattern!r} were found in {raw_directory}."
         )
-    target_directory = _target_output_directory(config_path, output_path)
     results: list[dict[str, Any]] = []
     failures: list[tuple[Path, Exception]] = []
     skipped: list[Path] = []
     pending_paths: list[Path] = []
-    for raw_path in raw_paths:
-        target_path = _target_output_path(target_directory, raw_path)
-        if target_path is not None:
-            skipped.append(raw_path)
-            print(f"SKIPPED {raw_path}: target output already exists at {target_path}")
-            continue
-        pending_paths.append(raw_path)
+    output_parent = _output_parent(output_path, config_path)
+    with _run_directory_lock(output_parent):
+        existing_run_directory = _find_matching_run_directory(output_parent, config_path)
+        target_directory = (
+            _target_output_directory(existing_run_directory, config_path)
+            if existing_run_directory is not None
+            else None
+        )
+        for raw_path in raw_paths:
+            target_path = (
+                _target_output_path(target_directory, raw_path)
+                if target_directory is not None
+                else None
+            )
+            if target_path is not None:
+                skipped.append(raw_path)
+                print(f"SKIPPED {raw_path}: target output already exists at {target_path}")
+                continue
+            pending_paths.append(raw_path)
+
+        batch_output_directory = (
+            existing_run_directory
+            or _create_batch_output_directory(output_path, config_path)
+            if pending_paths
+            else None
+        )
 
     def record_failure(raw_path: Path, exc: Exception) -> None:
         if not continue_on_error:
@@ -116,7 +204,12 @@ def run_folder(
             try:
                 results.append(
                     _run_pipeline_worker(
-                        raw_path, navigation_db, config_path, platform, output_path
+                        raw_path,
+                        navigation_db,
+                        config_path,
+                        platform,
+                        output_path,
+                        batch_output_directory,
                     )
                 )
             except Exception as exc:
@@ -132,6 +225,7 @@ def run_folder(
                     config_path,
                     platform,
                     output_path,
+                    batch_output_directory,
                 ): raw_path
                 for raw_path in pending_paths
             }

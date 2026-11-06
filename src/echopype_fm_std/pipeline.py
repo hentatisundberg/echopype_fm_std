@@ -44,6 +44,7 @@ def run_pipeline(
     config_path: str | Path,
     platform: str | None = None,
     output_path: str | Path | None = None,
+    output_directory: str | Path | None = None,
     timings: MutableMapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Run input, navigation, calibration, boundaries, and echo integration.
@@ -137,12 +138,16 @@ def run_pipeline(
         result["stages_completed"].append("surface_detection")
         integration_cfg = cfg.get("echo_integration", {})
         output_cfg = cfg.get("output", {})
-        output_parent = Path(
-            output_path if output_path is not None else output_cfg.get("directory", "output")
-        )
-        run_name = f"run_{uuid4().hex}"
-        output_root = output_parent / run_name
-        output_root.mkdir(parents=True, exist_ok=False)
+        if output_directory is not None:
+            output_root = Path(output_directory)
+            run_name = output_root.name
+        else:
+            output_parent = Path(
+                output_path if output_path is not None else output_cfg.get("directory", "output")
+            )
+            run_name = f"run_{uuid4().hex}"
+            output_root = output_parent / run_name
+        output_root.mkdir(parents=True, exist_ok=output_directory is not None)
         copy2(config_path, output_root / "config.yaml")
         result["run_name"] = run_name
         result["output_directory"] = output_root
