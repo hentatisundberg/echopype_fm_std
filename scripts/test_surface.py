@@ -93,7 +93,7 @@ def process_file(raw_path: Path, config: dict, output_dir: Path, channel: int | 
         sv = sv_dataset["Sv"].assign_coords(echo_range=sv_dataset["echo_range"])
         surface = detect_surface(
             sv,
-            method="threshold",
+            method=config["surface"].get("method", "threshold"),
             params=config["surface"],
             channel=channel,
         )

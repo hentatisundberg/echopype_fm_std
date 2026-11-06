@@ -67,6 +67,21 @@ def export_boundary_summary(
     summary[columns].to_csv(Path(output_path), index=False)
 
 
+def export_boundary_line(
+    boundary: xr.DataArray,
+    output_path: str | Path,
+    *,
+    value_name: str,
+) -> None:
+    """Write one detected boundary value for every ping to CSV."""
+    if "ping_time" not in boundary.dims:
+        raise ValueError("boundary must have a 'ping_time' dimension")
+    if boundary.ndim != 1:
+        raise ValueError("boundary must be one-dimensional")
+    values = boundary.transpose("ping_time").to_dataframe(name=value_name).reset_index()
+    values.to_csv(Path(output_path), index=False)
+
+
 def export_mask_echogram(
     sv: xr.Dataset,
     surface_range: xr.DataArray,
@@ -74,8 +89,9 @@ def export_mask_echogram(
     output_path: str | Path,
     targets: xr.Dataset | None = None,
     clean_output_path: str | Path | None = None,
+    raw_clean_output_path: str | Path | None = None,
 ) -> None:
-    """Export an Sv echogram with excluded surface/bottom samples shaded."""
+    """Export masked and optionally unmasked Sv echograms."""
     import matplotlib.pyplot as plt
 
     if "Sv" not in sv or "echo_range" not in sv:
@@ -140,7 +156,9 @@ def export_mask_echogram(
     plt.close(figure)
 
     if clean_output_path is None:
-        return
+        if raw_clean_output_path is None:
+            return
+
     depth_span = float(ranges.max() - ranges.min())
     time_span = float(
         (sv["ping_time"].values[-1] - sv["ping_time"].values[0])
@@ -150,29 +168,37 @@ def export_mask_echogram(
     pixels_per_second = 8.0
     width = max(2.0, time_span * pixels_per_second / 180.0)
     height = max(2.0, depth_span * pixels_per_m / 180.0)
-    figure, axis = plt.subplots(figsize=(width, height), dpi=180)
-    axis.pcolormesh(
-        sv["ping_time"].values,
-        ranges.values,
-        echo.values,
-        shading="auto",
-        cmap="viridis",
-        vmin=-90,
-        vmax=-30,
-    )
-    axis.pcolormesh(
-        sv["ping_time"].values,
-        ranges.values,
-        excluded.where(excluded).values,
-        shading="auto",
-        cmap="Greys",
-        vmin=0,
-        vmax=1,
-        alpha=0.45,
-    )
-    axis.set_xlim(sv["ping_time"].values[0], sv["ping_time"].values[-1])
-    axis.set_ylim(float(ranges.max()), float(ranges.min()))
-    axis.axis("off")
-    figure.subplots_adjust(0, 0, 1, 1)
-    figure.savefig(Path(clean_output_path), dpi=180, pad_inches=0)
-    plt.close(figure)
+
+    def save_clean(path: str | Path, *, apply_mask: bool) -> None:
+        figure, axis = plt.subplots(figsize=(width, height), dpi=180)
+        axis.pcolormesh(
+            sv["ping_time"].values,
+            ranges.values,
+            echo.values,
+            shading="auto",
+            cmap="viridis",
+            vmin=-90,
+            vmax=-30,
+        )
+        if apply_mask:
+            axis.pcolormesh(
+                sv["ping_time"].values,
+                ranges.values,
+                excluded.where(excluded).values,
+                shading="auto",
+                cmap="Greys",
+                vmin=0,
+                vmax=1,
+                alpha=0.45,
+            )
+        axis.set_xlim(sv["ping_time"].values[0], sv["ping_time"].values[-1])
+        axis.set_ylim(float(ranges.max()), float(ranges.min()))
+        axis.axis("off")
+        figure.subplots_adjust(0, 0, 1, 1)
+        figure.savefig(Path(path), dpi=180, pad_inches=0)
+        plt.close(figure)
+
+    if clean_output_path is not None:
+        save_clean(clean_output_path, apply_mask=True)
+    if raw_clean_output_path is not None:
+        save_clean(raw_clean_output_path, apply_mask=False)

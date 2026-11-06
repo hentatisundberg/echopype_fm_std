@@ -34,7 +34,9 @@ def calibration_kwargs(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {"env_params": env_params, "cal_params": cal_params}
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
+def load_config(
+    path: str | Path, *, validate_platform: bool = True
+) -> dict[str, Any]:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(path)
@@ -45,10 +47,12 @@ def load_config(path: str | Path) -> dict[str, Any]:
     if not isinstance(cfg, dict):
         raise ConfigError("Configuration root must be a mapping.")
 
-    platform = cfg.get("navigation", {}).get("platform")
-    if not platform or platform == "CHANGE_ME":
-        raise ConfigError(
-            "navigation.platform must be set. The tracking database contains multiple platforms."
-        )
+    if validate_platform:
+        platform = cfg.get("navigation", {}).get("platform")
+        if not platform or platform == "CHANGE_ME":
+            raise ConfigError(
+                "navigation.platform must be set. The tracking database contains "
+                "multiple platforms."
+            )
 
     return cfg

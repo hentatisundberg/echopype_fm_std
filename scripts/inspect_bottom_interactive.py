@@ -1,11 +1,4 @@
-"""Interactively inspect Blackwell bottom parameters 
-for one RAW file at a time.
-
-python scripts/inspect_bottom_interactive.py \
-    --raw /data/raw_tricky_bottom/ \
-    --output /output/surface_interactive/
-"""
-
+"""Interactively inspect Blackwell bottom parameters for one RAW file at a time."""
 
 from __future__ import annotations
 
@@ -20,7 +13,7 @@ import echopype as ep
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from echopype_fm_std.bottom import (
     detect_bottom,
@@ -31,9 +24,6 @@ from echopype_fm_std.config import calibration_kwargs, load_config
 from echopype_fm_std.io import open_raw
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "config/default.yaml"
-MAX_PLOT_RANGES = 800
-MAX_PLOT_PINGS = 1600
 
 
 class BottomInspector:
@@ -50,14 +40,10 @@ class BottomInspector:
         self.output_dir = output_dir
         self.file_index = 0
         self.dataset = None
-        self._load_executor = ThreadPoolExecutor(max_workers=1)
-        self._detect_executor = ThreadPoolExecutor(max_workers=1)
-        self._load_future: Future[Any] | None = None
+        self.sv = None
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._load_future: Future[tuple[Any, Any]] | None = None
         self._detect_future: Future[Any] | None = None
-        self._file_generation = 0
-        self._detect_generation = 0
-        self._pending_file_index: int | None = None
-        self._pending_detection: tuple[Any, dict[str, Any], int] | None = None
         self._current_params: dict[str, Any] = {}
         self._closed = False
 
@@ -175,8 +161,6 @@ class BottomInspector:
 
         self.figure, self.axis = plt.subplots(figsize=(10, 7))
         self.canvas = FigureCanvasTkAgg(self.figure, master=plot_frame)
-        self.toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
-        self.toolbar.update()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.image = None
         self._raw_line, = self.axis.plot([], [], color="white", linewidth=1.0, alpha=0.8)
@@ -264,11 +248,10 @@ class BottomInspector:
             return
         raw_path = self.raw_paths[self.file_index]
         self.status.configure(text=f"Loading {raw_path.name}...")
-        generation = self._file_generation
-        self._load_future = self._load_executor.submit(self._prepare_file, raw_path)
-        self.root.after(100, lambda: self._poll_load(generation))
+        self._load_future = self._executor.submit(self._prepare_file, raw_path)
+        self.root.after(100, self._poll_load)
 
-    def _prepare_file(self, raw_path: Path) -> Any:
+    def _prepare_file(self, raw_path: Path) -> tuple[Any, Any]:
         ed = open_raw(raw_path, self.config)
         try:
             input_cfg = self.config["input"]
@@ -286,25 +269,19 @@ class BottomInspector:
                 pulse_compression=True,
                 to_disk=False,
             ).load()
-            return dataset
+            return sv.load(), dataset
         finally:
             ed.cleanup_swap_files()
 
-    def _poll_load(self, generation: int) -> None:
+    def _poll_load(self) -> None:
         if self._closed:
             return
         if self._load_future is None or not self._load_future.done():
-            self.root.after(100, lambda: self._poll_load(generation))
-            return
-        if generation != self._file_generation:
-            return
-        if self._pending_file_index is not None:
-            self._start_file(self._pending_file_index)
+            self.root.after(100, self._poll_load)
             return
         try:
-            self.dataset = self._load_future.result()
-            self._render_echogram()
-            self.status.configure(text="Loaded. Calculating bottom line...")
+            self.sv, self.dataset = self._load_future.result()
+            self.status.configure(text="Loaded. Click Apply to detect bottom.")
             self._apply()
         except Exception as exc:
             self.status.configure(text=f"Could not load file: {exc}")
@@ -319,23 +296,11 @@ class BottomInspector:
             self.status.configure(text=str(exc))
             return
         self._current_params = params
-        dataset = self.dataset
-        generation = self._file_generation
-        if self._detect_future is not None and not self._detect_future.done():
-            self._pending_detection = (dataset, params, generation)
-            self.status.configure(text="Queued the latest bottom calculation.")
-            return
-        self._start_detection(dataset, params, generation)
-
-    def _start_detection(
-        self, dataset: Any, params: dict[str, Any], generation: int
-    ) -> None:
-        self._detect_generation = generation
         self.status.configure(text="Calculating bottom line...")
-        self._detect_future = self._detect_executor.submit(self._detect_stages, dataset, params)
-        self.root.after(100, lambda: self._poll_detection(generation))
+        self._detect_future = self._executor.submit(self._detect_stages, params)
+        self.root.after(100, self._poll_detection)
 
-    def _detect_stages(self, dataset: Any, params: dict[str, Any]) -> tuple[Any, Any, Any]:
+    def _detect_stages(self, params: dict[str, Any]) -> tuple[Any, Any, Any]:
         raw_params = dict(
             params,
             offset=0.0,
@@ -349,14 +314,14 @@ class BottomInspector:
             postprocessing={"method": "none"},
             refinement={"enabled": False},
         )
-        raw = detect_bottom(dataset, params=raw_params)
-        preprocessed = detect_bottom(dataset, params=pre_params)
+        raw = detect_bottom(self.dataset, params=raw_params)
+        preprocessed = detect_bottom(self.dataset, params=pre_params)
         final = postprocess_bottom_line(
             preprocessed,
             options=params.get("postprocessing"),
         )
         final = refine_bottom_line(
-            dataset,
+            self.dataset,
             final,
             options=params.get("refinement"),
         )
@@ -365,69 +330,30 @@ class BottomInspector:
             final = final + offset
         return raw, preprocessed, final
 
-    def _poll_detection(self, generation: int) -> None:
+    def _poll_detection(self) -> None:
         if self._closed:
             return
         if self._detect_future is None or not self._detect_future.done():
-            self.root.after(100, lambda: self._poll_detection(generation))
+            self.root.after(100, self._poll_detection)
             return
         try:
-            result = self._detect_future.result()
-        except Exception as exc:
-            result = None
-            if generation == self._file_generation:
-                self.status.configure(text=f"Could not calculate bottom: {exc}")
-        pending = self._pending_detection
-        self._pending_detection = None
-        if pending is not None:
-            self._start_detection(*pending)
-            return
-        if generation != self._file_generation or result is None:
-            return
-        try:
-            self._render(*result)
+            self._render(*self._detect_future.result())
         except Exception as exc:
             self.status.configure(text=f"Could not calculate bottom: {exc}")
 
     def _render(self, raw: Any, preprocessed: Any, final: Any) -> None:
         if self.dataset is None:
             return
-        self._render_echogram()
-        self._raw_line.set_data(raw["ping_time"].values, raw.values)
-        self._preprocessed_line.set_data(preprocessed["ping_time"].values, preprocessed.values)
-        self._final_line.set_data(final["ping_time"].values, final.values)
-        valid = np.isfinite(final.values)
-        coverage = float(valid.mean() * 100.0) if valid.size else 0.0
-        self.status.configure(
-            text=f"Ready. Detections: {valid.sum()}/{valid.size} ({coverage:.1f}%)."
-        )
-        self.canvas.draw_idle()
-
-    def _render_echogram(self) -> None:
-        if self.dataset is None:
-            return
         sv = self.dataset["Sv"].isel(channel=0)
         range_dim = next(dim for dim in sv.dims if dim != "ping_time")
-        ping_stride = max(1, int(np.ceil(sv.sizes["ping_time"] / MAX_PLOT_PINGS)))
-        range_stride = max(1, int(np.ceil(sv.sizes[range_dim] / MAX_PLOT_RANGES)))
-        echogram = sv.transpose(range_dim, "ping_time").isel(
-            {
-                range_dim: slice(None, None, range_stride),
-                "ping_time": slice(None, None, ping_stride),
-            }
-        )
+        stride = max(1, int(sv.sizes["ping_time"] / 2000))
+        echogram = sv.transpose(range_dim, "ping_time").isel(ping_time=slice(None, None, stride))
         range_coord = self.dataset["echo_range"].isel(channel=0)
         range_coord = range_coord.transpose(range_dim, "ping_time").isel(
-            {
-                range_dim: slice(None, None, range_stride),
-                "ping_time": slice(None, None, ping_stride),
-            }
+            ping_time=slice(None, None, stride)
         )
         if self.image is not None:
             self.image.remove()
-        self._raw_line.set_data([], [])
-        self._preprocessed_line.set_data([], [])
-        self._final_line.set_data([], [])
         self.image = self.axis.pcolormesh(
             echogram["ping_time"].values,
             range_coord.values,
@@ -437,6 +363,9 @@ class BottomInspector:
             vmin=-100,
             vmax=-30,
         )
+        self._raw_line.set_data(raw["ping_time"].values, raw.values)
+        self._preprocessed_line.set_data(preprocessed["ping_time"].values, preprocessed.values)
+        self._final_line.set_data(final["ping_time"].values, final.values)
         self.axis.set(
             title=f"Blackwell bottom: {self.raw_paths[self.file_index].name}",
             xlabel="Ping time",
@@ -451,28 +380,20 @@ class BottomInspector:
         if finite_ranges.size:
             self.axis.set_ylim(float(finite_ranges.max()), float(finite_ranges.min()))
         self.axis.legend(loc="best")
+        valid = np.isfinite(final.values)
+        coverage = float(valid.mean() * 100.0) if valid.size else 0.0
+        self.status.configure(
+            text=f"Ready. Detections: {valid.sum()}/{valid.size} ({coverage:.1f}%)."
+        )
         self.canvas.draw_idle()
 
     def _change_file(self, step: int) -> None:
         if self._load_future is not None and not self._load_future.done():
-            current_index = (
-                self._pending_file_index
-                if self._pending_file_index is not None
-                else self.file_index
-            )
-            self._pending_file_index = (current_index + step) % len(self.raw_paths)
-            self.status.configure(
-                text=f"Queued {self.raw_paths[self._pending_file_index].name}..."
-            )
+            self.status.configure(text="Still loading the current file.")
             return
-        self._start_file((self.file_index + step) % len(self.raw_paths))
-
-    def _start_file(self, file_index: int) -> None:
-        self._file_generation += 1
-        self.file_index = file_index
-        self._pending_file_index = None
+        self.file_index = (self.file_index + step) % len(self.raw_paths)
         self.dataset = None
-        self.status.configure(text=f"Loading {self.raw_paths[self.file_index].name}...")
+        self.sv = None
         self._load_file()
 
     def _save_yaml(self) -> None:
@@ -490,8 +411,7 @@ class BottomInspector:
 
     def close(self) -> None:
         self._closed = True
-        self._load_executor.shutdown(wait=False, cancel_futures=True)
-        self._detect_executor.shutdown(wait=False, cancel_futures=True)
+        self._executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
 
@@ -501,7 +421,7 @@ def main() -> None:
         "--raw",
         type=Path,
         action="append",
-        help="RAW file or folder to inspect; repeat this option.",
+        help="RAW file or folder to process; repeat this option.",
     )
     parser.add_argument(
         "--folder",
@@ -509,36 +429,37 @@ def main() -> None:
         action="append",
         help="Folder containing RAW files; repeat this option.",
     )
+    parser.add_argument("--config", type=Path, default=ROOT / "config/default.yaml")
     parser.add_argument(
         "--output-dir",
         "--output",
+        dest="output_dir",
         type=Path,
         default=ROOT / "output/bottom-interactive",
     )
     args = parser.parse_args()
-    config = load_config(CONFIG)
-    raw_paths = _raw_paths(args.raw, args.folder)
+    config_path = args.config if args.config.is_absolute() else ROOT / args.config
+    try:
+        config = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
+    raw_values = args.raw or []
+    folder_values = args.folder or []
+    raw_paths = []
+    for value in [*raw_values, *folder_values]:
+        path = value if value.is_absolute() else ROOT / value
+        if path.is_dir():
+            raw_paths.extend(sorted(path.glob("*.raw")))
+        elif path.is_file():
+            raw_paths.append(path)
+    if not raw_values and not folder_values:
+        raw_paths = sorted((ROOT / "data/raw").glob("*.raw"))
+    raw_paths = list(dict.fromkeys(raw_paths))
     if not raw_paths:
         parser.error("No RAW files found. Pass --raw FILE or --folder DIRECTORY.")
     root = tk.Tk()
     BottomInspector(root, raw_paths, config, args.output_dir)
     root.mainloop()
-
-
-def _raw_paths(
-    raw_values: list[Path] | None,
-    folder_values: list[Path] | None,
-) -> list[Path]:
-    paths: list[Path] = []
-    for value in [*(raw_values or []), *(folder_values or [])]:
-        path = value if value.is_absolute() else ROOT / value
-        if path.is_dir():
-            paths.extend(sorted(path.glob("*.raw")))
-        elif path.is_file():
-            paths.append(path)
-    if not raw_values and not folder_values:
-        paths = sorted((ROOT / "data/raw_tricky_bottom").glob("*.raw"))
-    return list(dict.fromkeys(paths))
 
 
 if __name__ == "__main__":

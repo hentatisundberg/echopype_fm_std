@@ -1,0 +1,173 @@
+{
+  "format": "echopype-fm-surface-annotation-v1",
+  "raw_file": "/Users/jonas/Documents/Programming/python/echopype_fm_std/data/raw_surface_turb/SLUAquaSailor2020V1-Phase0-D20260425-T193551-0.raw",
+  "csv_file": "SLUAquaSailor2020V1-Phase0-D20260425-T193551-0_surface.csv",
+  "channel": null,
+  "vertices": [
+    {
+      "ping_index": -0.07427661636439087,
+      "surface_range_m": 1.6749739943545405
+    },
+    {
+      "ping_index": 0.8582057130444234,
+      "surface_range_m": 1.7282086115155675
+    },
+    {
+      "ping_index": 1.97148908439231,
+      "surface_range_m": 3.453010207532828
+    },
+    {
+      "ping_index": 2.9066471163245353,
+      "surface_range_m": 3.623360982448113
+    },
+    {
+      "ping_index": 4.019930487672424,
+      "surface_range_m": 3.932121761982067
+    },
+    {
+      "ping_index": 4.9996198544585635,
+      "surface_range_m": 4.091825613465147
+    },
+    {
+      "ping_index": 6.0238405560986195,
+      "surface_range_m": 5.38010334876199
+    },
+    {
+      "ping_index": 7.137123927446508,
+      "surface_range_m": 4.357998699270279
+    },
+    {
+      "ping_index": 7.938687954816986,
+      "surface_range_m": 3.9108279151176566
+    },
+    {
+      "ping_index": 9.051971326164873,
+      "surface_range_m": 2.186026319100396
+    },
+    {
+      "ping_index": 9.942598023243184,
+      "surface_range_m": 1.8027370755410042
+    },
+    {
+      "ping_index": 10.966818724883241,
+      "surface_range_m": 1.643033224057925
+    },
+    {
+      "ping_index": 12.080102096231128,
+      "surface_range_m": 1.6749739943545405
+    },
+    {
+      "ping_index": 12.970728793309435,
+      "surface_range_m": 2.3137894002868595
+    },
+    {
+      "ping_index": 13.816824155533832,
+      "surface_range_m": 2.3670240174478865
+    },
+    {
+      "ping_index": 14.974638861735633,
+      "surface_range_m": 3.932121761982067
+    },
+    {
+      "ping_index": 16.087922233083525,
+      "surface_range_m": 3.3358940497785694
+    },
+    {
+      "ping_index": 16.934017595307914,
+      "surface_range_m": 5.241693344143321
+    },
+    {
+      "ping_index": 17.958238296947975,
+      "surface_range_m": 5.369456425329785
+    },
+    {
+      "ping_index": 19.116053003149773,
+      "surface_range_m": 6.242504146770621
+    },
+    {
+      "ping_index": 19.96214836537417,
+      "surface_range_m": 4.219588694651611
+    },
+    {
+      "ping_index": 20.94183773216031,
+      "surface_range_m": 3.5275386715582653
+    },
+    {
+      "ping_index": 21.876995764092534,
+      "surface_range_m": 3.453010207532828
+    },
+    {
+      "ping_index": 22.990279135440424,
+      "surface_range_m": 3.6446548293125236
+    },
+    {
+      "ping_index": 23.969968502226564,
+      "surface_range_m": 2.8035478781683043
+    },
+    {
+      "ping_index": 25.12778320842837,
+      "surface_range_m": 1.8772655395664417
+    },
+    {
+      "ping_index": 26.062941240360594,
+      "surface_range_m": 2.2179670893970114
+    },
+    {
+      "ping_index": 26.99809927229282,
+      "surface_range_m": 2.122144778507164
+    },
+    {
+      "ping_index": 28.066851308786788,
+      "surface_range_m": 2.760960184439483
+    },
+    {
+      "ping_index": 29.002009340719013,
+      "surface_range_m": 3.3252471263463645
+    },
+    {
+      "ping_index": 30.026230042359074,
+      "surface_range_m": 3.2826594326175433
+    },
+    {
+      "ping_index": 31.05045074399913,
+      "surface_range_m": 1.6749739943545405
+    },
+    {
+      "ping_index": 31.762952101661774,
+      "surface_range_m": 1.81338399897321
+    },
+    {
+      "ping_index": 32.965298142717494,
+      "surface_range_m": 2.8035478781683043
+    },
+    {
+      "ping_index": 33.989518844357555,
+      "surface_range_m": 4.783875636558492
+    },
+    {
+      "ping_index": 34.969208211143695,
+      "surface_range_m": 5.007461028634804
+    },
+    {
+      "ping_index": 36.08249158249158,
+      "surface_range_m": 5.53980720024507
+    },
+    {
+      "ping_index": 37.0176496144238,
+      "surface_range_m": 1.6962678412189511
+    },
+    {
+      "ping_index": 37.99733898120994,
+      "surface_range_m": 3.080367887405642
+    },
+    {
+      "ping_index": 39.06609101770392,
+      "surface_range_m": 2.9526048062191785
+    },
+    {
+      "ping_index": 40.04578038449006,
+      "surface_range_m": 2.931310959354768
+    }
+  ],
+  "created_utc": "2026-11-04T12:09:42.363548+01:00"
+}

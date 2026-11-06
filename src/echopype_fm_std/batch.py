@@ -21,6 +21,22 @@ def _target_output_directory(
     return output_root / output_cfg.get("targets_directory", "single_targets")
 
 
+def _target_output_path(
+    target_directory: Path,
+    raw_path: Path,
+) -> Path | None:
+    """Find a completion marker in the current or a versioned output root."""
+    target_path = target_directory / f"{raw_path.stem}_single_targets.csv"
+    if target_path.exists():
+        return target_path
+    for candidate in target_directory.parent.glob(
+        f"*/{target_directory.name}/{raw_path.stem}_single_targets.csv"
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _run_pipeline_worker(
     raw_path: Path,
     navigation_db: str | Path,
@@ -46,6 +62,8 @@ def _run_pipeline_worker(
         "source_file": source_file,
         "stages_completed": result["stages_completed"],
         "stages_pending": result.get("stages_pending", []),
+        "run_name": result.get("run_name"),
+        "output_directory": result.get("output_directory"),
     }
 
 
@@ -80,8 +98,8 @@ def run_folder(
     skipped: list[Path] = []
     pending_paths: list[Path] = []
     for raw_path in raw_paths:
-        target_path = target_directory / f"{raw_path.stem}_single_targets.csv"
-        if target_path.exists():
+        target_path = _target_output_path(target_directory, raw_path)
+        if target_path is not None:
             skipped.append(raw_path)
             print(f"SKIPPED {raw_path}: target output already exists at {target_path}")
             continue

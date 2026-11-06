@@ -61,21 +61,6 @@ class SurfaceInspector:
         params = config.get("surface", {})
         ttk.Label(controls, text="Surface parameters", font=("", 12, "bold")).pack(anchor="w")
         self._add_entry(
-            controls, "threshold_db", "Threshold (dB)", params.get("threshold_db", -77.0)
-        )
-        self._add_entry(
-            controls,
-            "consecutive_samples",
-            "Consecutive samples",
-            params.get("consecutive_samples", 3),
-        )
-        self._add_entry(
-            controls,
-            "dead_zone_samples",
-            "Dead zone samples",
-            params.get("dead_zone_samples", 10),
-        )
-        self._add_entry(
             controls,
             "range_bin_fraction",
             "Range bin fraction",
@@ -97,13 +82,13 @@ class SurfaceInspector:
         self._add_entry(
             controls,
             "wave_threshold_db",
-            "Wave threshold (dB)",
+            "Active wave threshold (dB)",
             params.get("wave_threshold_db", -77.0),
         )
         self._add_entry(
             controls,
             "wave_threshold_layer_db",
-            "Layer threshold (dB)",
+            "Wave layer threshold (dB)",
             params.get("wave_threshold_layer_db", -68.0),
         )
         self._add_entry(
@@ -127,7 +112,7 @@ class SurfaceInspector:
         self._add_entry(
             controls,
             "layer_strength_threshold_db",
-            "Layer threshold (dB)",
+            "Persistent layer threshold (dB)",
             params.get("layer_strength_threshold_db", -80.0),
         )
         self._add_entry(
@@ -205,8 +190,6 @@ class SurfaceInspector:
                 raise ValueError(f"{key} must be numeric") from exc
 
         integer_keys = {
-            "consecutive_samples",
-            "dead_zone_samples",
             "rolling_ping_window",
             "wave_consecutive_samples",
             "beam_dead_zone_samples",
@@ -215,7 +198,6 @@ class SurfaceInspector:
         }
         output: dict[str, Any] = {}
         for key in (
-            "threshold_db",
             "range_bin_fraction",
             "wave_threshold_db",
             "wave_threshold_layer_db",
@@ -440,6 +422,22 @@ def _resolve_channel(value: str | None) -> int | str | None:
         return value
 
 
+def _merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_inspector_config(path: Path) -> dict[str, Any]:
+    default = load_config(ROOT / "config/default.yaml")
+    supplied = load_config(path, validate_platform=False)
+    return _merge_config(default, supplied)
+
+
 def _raw_paths(
     raw_values: list[Path] | None,
     folder_values: list[Path] | None,
@@ -472,10 +470,20 @@ def main() -> None:
         help="Folder containing RAW files; repeat this option.",
     )
     parser.add_argument("--config", type=Path, default=ROOT / "config/default.yaml")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "output/surface-interactive")
+    parser.add_argument(
+        "--output-dir",
+        "--output",
+        dest="output_dir",
+        type=Path,
+        default=ROOT / "output/surface-interactive",
+    )
     parser.add_argument("--channel", help="Channel label or zero-based channel index.")
     args = parser.parse_args()
-    config = load_config(args.config)
+    config_path = args.config if args.config.is_absolute() else ROOT / args.config
+    try:
+        config = _load_inspector_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
     raw_paths = _raw_paths(args.raw, args.folder)
     if not raw_paths:
         parser.error("No RAW files found. Pass --raw FILE or --folder DIRECTORY.")

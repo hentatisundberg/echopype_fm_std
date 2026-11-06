@@ -1,0 +1,120 @@
+# Pipeline configuration for one EK80 FM RAW file.
+
+input:
+  sonar_model: EK80
+  waveform_mode: FM
+  encoding_mode: complex
+  beam_group: Beam_group1
+  # Survey-specific transducer depth below the water surface, in metres.
+  # Set this before producing absolute target depth; null means unknown.
+  transducer_depth_m: 0.54
+
+navigation:
+  # Default platform. For a RAW file from another platform, use the
+  # per-run --platform override rather than maintaining another config file.
+  platform: SAILOR2
+  interpolation: linear
+  max_gap_seconds: null
+  extrapolate: false
+  navigation_db: data/positions/sailbuoy_metadatabase.db
+
+environment:
+  temperature: 12
+  salinity: 8
+  pressure: 1.1325
+
+
+calibration:        # 28.55 for Sailor 2, 29.03 for Sailor 1
+  gain_correction: 29.03
+  equivalent_beam_angle: -21
+
+surface:
+  method: threshold
+  use_original_wave_logic: false
+  # -85 dB includes most of the measured background in this file.
+  threshold_db: -50
+  range_bin_fraction: 0.1
+  smooth_depth_size: 7
+  smooth_ping_size: 3
+  closing_height: 7
+  median_window: 5
+  top_exclude_rows: 10
+  
+
+# To use the fast legacy echoedge2 Sailor detector instead, set
+# method: legacy and configure its detector parameters below.
+bottom:
+  method: legacy # alt: blackwell
+  params:
+    window_size: 10         # for legacy detector
+    hardness_thresh: -50.0  # for legacy detector
+    offset: 2.0             # metres shallower than the detected bottom
+    #var_name: Sv
+    #threshold: [-35.0, 0.03, 0.03]
+    #offset: -1.5
+    #r0: 5.0
+    #r1: 100.0
+    #wtheta: 28
+    #wphi: 52
+    # Experimental Sv and bottom-line conditioning. "none" preserves the
+    # direct Blackwell result; promote alternatives only after validation.
+    #preprocessing:
+    #  method: median_max
+    #  window: 3
+    #  median_window: 5
+    #  max_window: 5
+    #  max_gap: 3
+    #postprocessing:
+    #  method: max_interpolate
+    #  window: 7
+    #  max_deviation_m: 10.0
+    #  max_gap: 7
+      # "linear" extrapolates leading/trailing gaps; 0 means no edge limit.
+    #  edge_fill: linear
+    #  max_edge_gap: 0
+    #refinement:
+    #  enabled: true
+    #  window_m: 3.0
+    #  threshold_db: -45.0
+
+    # For method: legacy, use:
+
+single_target:
+  enabled: true
+  method: echoview_splitbeam_method2
+  params:
+    pldl_db: 6.0
+    min_norm_pulse: 0.8
+    max_norm_pulse: 1.5
+    beam_comp_model: simrad_lobe
+    max_beam_comp_db: 6.0
+    max_sd_minor_deg: 0.2
+    max_sd_major_deg: 0.2
+    TS_comp_max: -10
+    TS_comp_min: -60
+    
+    # Optional parameters
+
+    dec_tir_samples: 1
+    bottom_offset_m: 0.5
+    exclude_above_m: 5
+    exclude_below_m: null
+    allow_nans_inside_envelope: false
+
+echo_integration:
+  enabled: true
+  # Layers start at the detected sea surface and extend downward.
+  relative_to_surface: true
+  layer_size_m: 10.0
+  distance_bin_nmi: 0.1
+
+output:
+  directory: "output"
+  images_directory: "images"
+  masked_images_subdirectory: "masked_with_axes"
+  clean_images_subdirectory: "masked_clean"
+  raw_images_subdirectory: "raw_clean"
+  masks_directory: "masks"
+  targets_directory: "single_targets"
+  integration_directory: "integration"
+  include_metadata_columns: false

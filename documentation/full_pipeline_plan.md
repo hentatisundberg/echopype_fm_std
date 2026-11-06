@@ -255,6 +255,12 @@ centered rolling maximum across nearby pings; the default
 `rolling_ping_window: 3` takes the deepest detected boundary from the previous,
 current, and next ping, with `min_periods=1` at file edges. This is intended
 to bridge small gaps between surface spikes and strong turbidity echoes.
+The detector also supports optional centered vertical smoothing of the Sv
+values before threshold/run detection. Configure
+`vertical_smoothing_pixels` (in post-coarsening pixels) and
+`vertical_smoothing_statistic` (`max`, `mean`, or `median`) under `surface`;
+the default one-pixel window preserves the previous behavior. The same
+configuration is exposed by `scripts/inspect_surface_interactive.py`.
 
 The previous 5 m result was traced to two implementation errors: `-50 dB`
 detected the first quiet background region rather than the original surface

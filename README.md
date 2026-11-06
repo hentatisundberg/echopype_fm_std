@@ -49,6 +49,137 @@ Inspect an EK80 RAW file before running processing:
 echopype-fm inspect --raw /path/to/file.raw
 ```
 
+### Manually annotate surface/turbidity lines
+
+For a small reference set, annotate the turbidity boundary directly on the
+calibrated echogram:
+
+```bash
+python scripts/annotate_surface.py \
+  --folder /path/to/raw/files \
+  --config config/default.yaml \
+  --output-dir output/surface-annotations
+```
+
+Left-click to add or move vertices, right-click to remove the nearest vertex,
+and save before changing files. Each saved annotation contains a CSV with one
+row per ping (`surface_range_m` is NaN outside the clicked range) and a JSON
+sidecar with the RAW path and vertices. This makes the CSV suitable as a
+direct target for parameter optimization without requiring the GUI.
+
+The loader for an optimization script is `load_surface_annotation`:
+
+```python
+from echopype_fm_std.annotation import load_surface_annotation
+
+labels = load_surface_annotation("output/surface-annotations/example_surface.csv")
+target_ranges = labels["surface_range_m"]
+```
+
+To visualize a saved annotation over the calibrated echogram:
+
+```bash
+python scripts/plot_surface_annotation.py \
+  --raw /path/to/example.raw \
+  --annotation output/surface-annotations/example_surface.csv \
+  --config config/default.yaml \
+  --output example_surface.png
+```
+
+Use `--show` for an interactive Matplotlib window instead of only saving the
+image.
+
+### Optimize surface/turbidity detection
+
+Use the annotated RAW files to compare parameter combinations from the
+existing classic detectors:
+
+```bash
+python scripts/optimize_surface.py \
+  --folder data/raw_surface_turb \
+  --annotation output/surface_annotations \
+  --config config/default.yaml \
+  --output-dir output/surface_optimization
+```
+
+The config data for this optimizer is in config/surface_optimization
+
+The default search evaluates a focused grid for the `threshold` detector.
+It scores each annotated ping in metres, with a default penalty of 10 for a
+prediction that is too shallow (unsafe under-masking), 1 for a prediction that
+is deeper (extra masking), and 100 for a missing prediction. Adjust these
+weights with `--under-penalty`, `--over-penalty`, and `--missing-penalty`.
+They can also be stored in the main configuration:
+
+Command-line penalty values override configuration values. RAW files are paired
+by filename stem (`<raw-stem>_surface.csv`); files without an exact matching
+annotation are reported and skipped.
+The built-in search ranges and maximum combination count are stored in
+`surface_optimization.search` and `surface_optimization.max_combinations` in
+the configuration file. Use `--grid custom.yaml` to override the search;
+top-level entries are parameter lists, while `base_params` supplies fixed
+detector parameters.
+
+The optimization configuration explicitly defines the reduced, method-specific
+detector parameters in `surface_optimization.base_params`. Search values
+override those fixed values, but detector parameters are never inherited from
+`config/default.yaml`; inactive, missing, or unknown parameters are rejected.
+`search_mode: one_at_a_time` is recommended for staged experiments: it tests
+the baseline and each configured parameter value separately. Use
+`search_mode: cartesian` only after narrowing the parameter set.
+`max_files` limits the validation set for quick experiments.
+
+The optimizer currently exposes these active parameters:
+
+- `threshold`: `threshold_db`, `range_bin_fraction`, `smooth_depth_size`,
+  `smooth_ping_size`, `closing_height`, `median_window`,
+  `top_exclude_rows`, `wave_threshold_layer_db`,
+  `layer_strength_threshold_db`, `layer_min_ping_fraction`,
+  `layer_min_thickness_bins`
+
+Wave-logic compatibility parameters are intentionally excluded from this
+optimization config because they are inactive for the explicit method above.
+This prevents a parameter from appearing tunable when the detector branch
+ignores it.
+
+The threshold detector checks for a strong contiguous band starting at the
+search top, ending before the bottom of the echogram, and present at the same
+range bins across most pings. `layer_strength_threshold_db` defines strong
+echoes, `layer_min_ping_fraction` defines how consistently they must occur
+across the file, and `layer_min_thickness_bins` rejects thin features.
+When such a layer is detected, `wave_threshold_layer_db` replaces the normal
+threshold for boundary detection.
+
+For wave detection, `wave_gap_bridge_pings` bridges short breaks in the same
+wave across adjacent pings. For example, a value of `2` fills a one-ping
+break; `0` disables this additional conservative masking.
+
+The output directory contains `surface_optimization_results.csv` with every
+case and combination, `best_parameters.json` with the best ranked results,
+`best_predictions.csv` with annotated/calculated per-ping values, and PNG
+overlays in `plots/`. Review both the weighted score and `under_fraction`
+before selecting inference parameters; the lowest score is not a substitute
+for visual inspection.
+
+To regenerate plots from the saved best parameter combinations without
+evaluating the full search again, use:
+
+```bash
+python scripts/optimize_surface.py \
+  --folder data/raw_surface_turb \
+  --annotation output/surface_annotations \
+  --config config/surface_optimization.yaml \
+  --output-dir output/surface_optimization
+```
+
+Plot-only mode recalculates only the saved top combinations and regenerates
+their overlays using the calibrated `echo_range` coordinate.
+
+The optimizer merges the supplied file with `config/default.yaml`, so a
+search-only configuration does not need `navigation.platform`. Platform
+validation remains required for full pipeline commands because those commands
+use the tracking database.
+
 ## Configuration
 
 Copy and edit `config/default.yaml`. The configuration controls the input
@@ -57,6 +188,14 @@ and bottom detection, echo integration, single-target filtering, and output
 directories. The `navigation.platform` value is required because the SQLite
 database contains positions for multiple platforms; use the per-run
 `--platform` option when a file belongs to another platform.
+
+Each successful pipeline invocation creates a unique random run directory
+under `output.directory` (or the `--output-dir` value for `run-folder`). The
+directory contains the copied input configuration as `config.yaml`, plus the
+usual `images`, `masks`, `single_targets`, and `integration` outputs. Detected
+surface and bottom values for every ping are written as separate CSV files in
+`boundary_lines/` (`*_surface.csv` and `*_bottom.csv`). The directory names
+can be customized with the corresponding `output` settings.
 
 The supplied configuration uses:
 
@@ -271,10 +410,10 @@ Each run also writes
 `output/masks/<raw-stem>_mask_summary.csv`, containing one row with maximum,
 mean, and variance of the surface-turbidity and bottom depths, plus survey
 start/end time and position. It writes
-`output/images/<raw-stem>_mask_echogram.png`: a calibrated `Sv`
+`output/images/masked_with_axes/<raw-stem>_mask_echogram.png`: a calibrated `Sv`
 echogram with the surface and bottom lines and a semi-transparent grey
 overlay showing samples excluded by the mask. Detected targets are plotted as
-white crosses. A separate `output/images/<raw-stem>_mask_clean.png` contains
+white crosses. A separate `output/images/masked_clean/<raw-stem>_mask_clean.png` contains
 only the raster image and mask overlay, without axes, titles, legends, or
 colorbars. Its pixel scale is based on elapsed time and physical depth, so
 longer surveys produce wider images rather than horizontally stretching the
@@ -289,8 +428,12 @@ For the default output settings, a successful run produces:
 ```text
 output/
 ├── images/
-│   ├── <raw-stem>_mask_echogram.png
-│   └── <raw-stem>_mask_clean.png
+│   ├── masked_with_axes/
+│   │   └── <raw-stem>_mask_echogram.png
+│   ├── masked_clean/
+│   │   └── <raw-stem>_mask_clean.png
+│   └── raw_clean/
+│       └── <raw-stem>_raw_clean.png
 ├── masks/
 │   └── <raw-stem>_mask_summary.csv
 ├── single_targets/
@@ -318,6 +461,12 @@ the original `find_waves.py` thresholds, averages the range dimension in
 groups of ten samples, and applies a centered three-ping rolling maximum to
 conservatively bridge short gaps. The output directory contains one
 `*_surface.png` overlay per input RAW file.
+
+When `use_original_wave_logic` is enabled (the default), tune the surface
+threshold, wave run length, beam dead zone, range coarsening, rolling window,
+and vertical gap-bridging settings in the interactive inspector. The detector
+retains a separate internal layer fallback threshold, but it is not exposed as
+a duplicate GUI control.
 
 The FM calibration, pulse-compressed split-beam angle calculation, target
 detector, target TS calculation, and CSV writers are implemented through
@@ -428,10 +577,22 @@ python scripts/inspect_surface_interactive.py \
   --folder data/raw
 ```
 
+To prepare values for the staged optimizer, use the optimization config:
+
+```bash
+python scripts/inspect_surface_interactive.py \
+  --folder data/raw_surface_turb \
+  --config config/surface_optimization.yaml \
+  --output-dir output/surface-interactive
+```
+
+The inspector uses the `threshold` method. `Save YAML` writes its explicit
+`base_params` in a search-compatible format.
+
 The inspector loads the configured calibration and displays the calibrated
 `Sv` echogram with the detected surface/turbidity boundary overlaid. Its
-controls cover all parameters in the `surface` section of
-`config/default.yaml`, including the original wave logic thresholds. `Apply`
+controls come from `surface_optimization.base_params` in the supplied config.
+`Apply`
 recalculates the boundary in the background; `Previous` and `Next` navigate
 files passed with repeated `--raw` or `--folder` arguments, and `Save YAML`
 writes the current `surface` parameters to the output directory as a

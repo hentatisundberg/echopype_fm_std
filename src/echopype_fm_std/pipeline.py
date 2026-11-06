@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from shutil import copy2
 from time import perf_counter
 from typing import Any, Iterator, MutableMapping
+from uuid import uuid4
 
 import echopype as ep
 
@@ -11,7 +13,12 @@ from .bottom import blackwell_optimized, detect_bottom, legacy_bottom
 from .config import calibration_kwargs, load_config
 from .integration import export_integration_csv, integrate_echoes
 from .io import get_beam_group, open_raw
-from .masks import export_boundary_summary, export_mask_echogram, summarize_boundaries
+from .masks import (
+    export_boundary_line,
+    export_boundary_summary,
+    export_mask_echogram,
+    summarize_boundaries,
+)
 from .navigation import add_navigation_to_echodata, align_navigation, read_navigation
 from .single_target import detect_fm_targets, mask_target_dataset, prepare_fm_sp
 from .surface import detect_surface
@@ -47,6 +54,7 @@ def run_pipeline(
     """
     cfg = load_config(config_path)
     raw_path = Path(raw_path)
+    config_path = Path(config_path)
 
     with _timed_stage("read_raw", timings):
         ed = open_raw(raw_path, cfg)
@@ -129,17 +137,57 @@ def run_pipeline(
         result["stages_completed"].append("surface_detection")
         integration_cfg = cfg.get("echo_integration", {})
         output_cfg = cfg.get("output", {})
-        output_root = Path(
+        output_parent = Path(
             output_path if output_path is not None else output_cfg.get("directory", "output")
         )
+        run_name = f"run_{uuid4().hex}"
+        output_root = output_parent / run_name
+        output_root.mkdir(parents=True, exist_ok=False)
+        copy2(config_path, output_root / "config.yaml")
+        result["run_name"] = run_name
+        result["output_directory"] = output_root
         images_dir = output_root / output_cfg.get("images_directory", "images")
+        masked_images_dir = images_dir / output_cfg.get(
+            "masked_images_subdirectory", "masked_with_axes"
+        )
+        clean_images_dir = images_dir / output_cfg.get(
+            "clean_images_subdirectory", "masked_clean"
+        )
+        raw_images_dir = images_dir / output_cfg.get(
+            "raw_images_subdirectory", "raw_clean"
+        )
         masks_dir = output_root / output_cfg.get("masks_directory", "masks")
         targets_dir = output_root / output_cfg.get("targets_directory", "single_targets")
         integration_dir = output_root / output_cfg.get(
             "integration_directory", "integration"
         )
-        for directory in (images_dir, masks_dir, targets_dir, integration_dir):
+        boundary_lines_dir = output_root / output_cfg.get(
+            "boundary_lines_directory", "boundary_lines"
+        )
+        for directory in (
+            masked_images_dir,
+            clean_images_dir,
+            raw_images_dir,
+            masks_dir,
+            targets_dir,
+            integration_dir,
+            boundary_lines_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
+        surface_line_path = boundary_lines_dir / f"{raw_path.stem}_surface.csv"
+        bottom_line_path = boundary_lines_dir / f"{raw_path.stem}_bottom.csv"
+        export_boundary_line(
+            result["surface"],
+            surface_line_path,
+            value_name="surface_range_m",
+        )
+        export_boundary_line(
+            result["bottom"],
+            bottom_line_path,
+            value_name="bottom_range_m",
+        )
+        result["surface_line_csv"] = surface_line_path
+        result["bottom_line_csv"] = bottom_line_path
         if integration_cfg.get("enabled", True):
             with _timed_stage("echo_integration", timings):
                 integration = integrate_echoes(
@@ -223,8 +271,9 @@ def run_pipeline(
                 result["single_target_csv"] = target_path
                 result["single_target_count"] = filtered_targets.sizes.get("single_target", 0)
                 result["stages_completed"].append("single_target_detection")
-        mask_image_path = images_dir / f"{raw_path.stem}_mask_echogram.png"
-        clean_image_path = images_dir / f"{raw_path.stem}_mask_clean.png"
+        mask_image_path = masked_images_dir / f"{raw_path.stem}_mask_echogram.png"
+        clean_image_path = clean_images_dir / f"{raw_path.stem}_mask_clean.png"
+        raw_clean_image_path = raw_images_dir / f"{raw_path.stem}_raw_clean.png"
         with _timed_stage("mask_images", timings):
             export_mask_echogram(
                 sv,
@@ -237,9 +286,11 @@ def run_pipeline(
                     else None
                 ),
                 clean_output_path=clean_image_path,
+                raw_clean_output_path=raw_clean_image_path,
             )
         result["mask_echogram_png"] = mask_image_path
         result["mask_clean_png"] = clean_image_path
+        result["raw_clean_png"] = raw_clean_image_path
         result["stages_completed"].append("mask_images")
         return result
     finally:
